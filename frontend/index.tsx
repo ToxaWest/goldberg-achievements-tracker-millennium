@@ -1,30 +1,19 @@
-import { Millennium, definePlugin, IconsModule } from '@steambrew/client';
-import React from 'react';
+import { definePlugin, IconsModule } from '@steambrew/client';
 
 const SettingsContent = () => {
-    return (
-        <div style={{ padding: '20px', color: 'white' }}>
-            <h3>GSE Achievements</h3>
-            <p>Plugin is active. Settings logic will be added once stability is confirmed.</p>
-        </div>
+    // @ts-ignore
+    return window.SP_REACT.createElement('div', { style: { padding: '20px', color: 'white' } }, 
+        window.SP_REACT.createElement('h3', null, 'GSE Achievements'),
+        window.SP_REACT.createElement('p', null, 'Plugin is active.')
     );
 };
 
 export default definePlugin(() => {
     console.log('GSE Achievements loading...');
 
-    // Defensive hook registration matching working plugin pattern
-    if (typeof Millennium !== 'undefined' && Millennium.AddWindowCreateHook) {
-        Millennium.AddWindowCreateHook((context: any) => {
-            // Only handle main Steam windows
-            if (!context.m_strName?.startsWith('SP ')) return;
-            console.log('GSE Achievements: Main window detected', context.m_strName);
-        });
-    }
-
     return {
         title: 'GSE Achievements',
-        icon: <IconsModule.Settings />,
-        content: <SettingsContent />,
+        icon: IconsModule.Settings, // Some versions expect the component, some the reference
+        content: SettingsContent,
     };
 });

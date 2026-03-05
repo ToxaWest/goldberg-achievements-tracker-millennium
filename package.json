@@ -9,14 +9,12 @@
   "dependencies": {
     "@steambrew/api": "^5.5.3",
     "@steambrew/client": "^5.5.3",
-    "@steambrew/webkit": "^5.5.3",
-    "react": "latest",
-    "react-dom": "latest"
+    "@steambrew/webkit": "^5.5.3"
   },
   "devDependencies": {
     "@steambrew/ttc": "^2.7.3",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "typescript": "latest"
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.0.0"
   }
 }
