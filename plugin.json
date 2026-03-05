@@ -1,0 +1,7 @@
+{
+    "name": "Goldberg Achievements Tracker",
+    "author": "West",
+    "description": "Track and display achievements for Goldberg SteamEmu games.",
+    "version": "1.0.0",
+    "main": ".millennium/Dist/index.js"
+}

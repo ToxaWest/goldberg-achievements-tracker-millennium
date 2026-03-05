@@ -1,0 +1,22 @@
+{
+  "name": "goldberg-achievements-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npx esbuild src/index.tsx --bundle --outfile=index.js --platform=browser --minify --loader:.js=jsx --loader:.ts=tsx --loader:.tsx=tsx",
+    "watch": "npx esbuild src/index.tsx --bundle --outfile=index.js --platform=browser --watch --loader:.js=jsx --loader:.ts=tsx --loader:.tsx=tsx"
+  },
+  "dependencies": {
+    "@steambrew/api": "latest",
+    "@steambrew/client": "^5.5.3",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@steambrew/ttc": "^3.2.6",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "esbuild": "latest",
+    "typescript": "latest"
+  }
+}
