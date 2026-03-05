@@ -11,76 +11,10 @@ interface Achievement {
     icongray_path?: string;
 }
 
-// Declare backend methods
+// Declare backend methods (Lua functions)
 const getGameConfig = callable<[{ app_id: string }], any>('get_game_config');
 const getAchievements = callable<[{ app_id: string }], Achievement[]>('get_achievements');
 const saveGameConfig = callable<[{ app_id: string; interface_path: string; status_path: string }], { success: boolean }>('save_game_config');
-
-const AchievementsTab = ({ appId }: { appId: string }) => {
-    const [achievements, setAchievements] = React.useState<Achievement[]>([]);
-    const [loading, setLoading] = React.useState(true);
-    const [config, setConfig] = React.useState<any>(null);
-
-    React.useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                const gameConfig = await getGameConfig({ app_id: appId });
-                setConfig(gameConfig);
-                
-                if (gameConfig && gameConfig.interface_path) {
-                    const data = await getAchievements({ app_id: appId });
-                    setAchievements(data);
-                }
-            } catch (e) {
-                console.error("GSE Achievements: Error fetching data", e);
-            }
-            setLoading(false);
-        };
-        fetchData();
-    }, [appId]);
-
-    if (loading) return <div style={{ padding: '20px' }}>Loading Achievements...</div>;
-
-    if (!config || !config.interface_path) {
-        return (
-            <div style={{ padding: '20px', color: '#ccc' }}>
-                <h3>No Achievements Configured</h3>
-                <p>Please configure the achievement paths in the plugin settings for this game.</p>
-            </div>
-        );
-    }
-
-    return (
-        <div style={{ padding: '20px', overflowY: 'auto', maxHeight: '100%' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '15px' }}>
-                {achievements.map((ach) => (
-                    <div key={ach.name} style={{ 
-                        background: 'rgba(0,0,0,0.4)', 
-                        padding: '12px', 
-                        borderRadius: '10px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        opacity: ach.unlocked ? 1 : 0.5,
-                        filter: ach.unlocked ? 'none' : 'grayscale(0.8)'
-                    }}>
-                        <div style={{ position: 'relative', width: '64px', height: '64px', marginRight: '15px', flexShrink: 0 }}>
-                            <img 
-                                src={ach.unlocked ? ach.icon_path : ach.icongray_path} 
-                                style={{ width: '100%', height: '100%', borderRadius: '6px' }}
-                                onError={(e) => { (e.target as HTMLImageElement).src = 'https://community.cloudflare.steamstatic.com/public/images/apps/unknown.png'; }}
-                            />
-                        </div>
-                        <div style={{ flexGrow: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 'bold', fontSize: '1.1em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ach.display_name}</div>
-                            <div style={{ fontSize: '0.9em', color: '#bbb', lineHeight: '1.2', marginTop: '2px' }}>{ach.description}</div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
 
 const PluginSettings = () => {
     const [games, setGames] = React.useState<any[]>([]);
@@ -138,7 +72,7 @@ const PluginSettings = () => {
 
     return (
         <div style={{ padding: '20px', color: '#eee', maxWidth: '800px' }}>
-            <h2>GSE Achievements Tracker</h2>
+            <h2>GSE Achievements Tracker (Lua)</h2>
             <div style={{ marginTop: '20px' }}>
                 <label style={{ display: 'block', marginBottom: '5px' }}>Select Game:</label>
                 <select 
@@ -189,8 +123,19 @@ const PluginSettings = () => {
 export default definePlugin(() => {
     console.log("GSE Achievements: Injected successfully.");
 
-    // Remove direct AddTab/AddSettingsPage calls from definePlugin as they might crash CEF if undefined
-    // Instead, rely on the returned object which is the standard way in v2.
+    // Listen for backend events (Lua uses Millennium.emit)
+    (Millennium as any).onServerEvent('achievement_earned', (data: any) => {
+        console.log("GSE Achievements: Received event", data);
+        const { name, description, icon } = data;
+        if ((window as any).SteamClient?.Notifications?.DisplayNotification) {
+            (window as any).SteamClient.Notifications.DisplayNotification(
+                "Achievement Unlocked!",
+                name + "\n" + description,
+                icon || "",
+                ""
+            );
+        }
+    });
 
     return {
         title: "GSE Achievements",
