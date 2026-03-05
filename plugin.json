@@ -1,7 +1,12 @@
 {
-    "name": "Goldberg Achievements Tracker",
+    "$schema": "https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/src/sys/plugin-schema.json",
+    "name": "goldberg-achievements-tracker",
+    "common_name": "Goldberg Achievements Tracker",
     "author": "West",
     "description": "Track and display achievements for Goldberg SteamEmu games.",
-    "version": "1.0.0",
-    "main": ".millennium/Dist/index.js"
+    "version": "1.0.2",
+    "backendType": "python",
+    "useBackend": true,
+    "backend": "backend",
+    "frontend": "dist"
 }
