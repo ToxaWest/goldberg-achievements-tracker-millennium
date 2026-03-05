@@ -11,7 +11,7 @@ interface Achievement {
     icongray_path?: string;
 }
 
-// Declare backend methods with correct generic constraints [ArgsArray, ReturnType]
+// Declare backend methods
 const getGameConfig = callable<[{ app_id: string }], any>('get_game_config');
 const getAchievements = callable<[{ app_id: string }], Achievement[]>('get_achievements');
 const saveGameConfig = callable<[{ app_id: string; interface_path: string; status_path: string }], { success: boolean }>('save_game_config');
@@ -47,7 +47,6 @@ const AchievementsTab = ({ appId }: { appId: string }) => {
             <div style={{ padding: '20px', color: '#ccc' }}>
                 <h3>No Achievements Configured</h3>
                 <p>Please configure the achievement paths in the plugin settings for this game.</p>
-                <p style={{ fontSize: '0.8em', color: '#888' }}>Paths are set in: Millennium Settings &rarr; GSE Achievements</p>
             </div>
         );
     }
@@ -62,7 +61,6 @@ const AchievementsTab = ({ appId }: { appId: string }) => {
                         borderRadius: '10px',
                         display: 'flex',
                         alignItems: 'center',
-                        border: '1px solid rgba(255,255,255,0.05)',
                         opacity: ach.unlocked ? 1 : 0.5,
                         filter: ach.unlocked ? 'none' : 'grayscale(0.8)'
                     }}>
@@ -76,11 +74,6 @@ const AchievementsTab = ({ appId }: { appId: string }) => {
                         <div style={{ flexGrow: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 'bold', fontSize: '1.1em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ach.display_name}</div>
                             <div style={{ fontSize: '0.9em', color: '#bbb', lineHeight: '1.2', marginTop: '2px' }}>{ach.description}</div>
-                            {ach.unlocked && (
-                                <div style={{ fontSize: '0.8em', color: '#4caf50', marginTop: '6px', fontWeight: 'bold' }}>
-                                    ✓ Unlocked: {new Date(ach.unlock_time * 1000).toLocaleString()}
-                                </div>
-                            )}
                         </div>
                     </div>
                 ))}
@@ -98,9 +91,13 @@ const PluginSettings = () => {
 
     React.useEffect(() => {
         const loadGames = async () => {
-            if ((window as any).SteamClient?.Apps?.GetList) {
-                const list = await (window as any).SteamClient.Apps.GetList();
-                setGames(list.filter((app: any) => app.is_installed).sort((a: any, b: any) => a.display_name.localeCompare(b.display_name)));
+            try {
+                if ((window as any).SteamClient?.Apps?.GetList) {
+                    const list = await (window as any).SteamClient.Apps.GetList();
+                    setGames(list.filter((app: any) => app.is_installed).sort((a: any, b: any) => a.display_name.localeCompare(b.display_name)));
+                }
+            } catch (e) {
+                console.error("GSE Achievements: Error getting app list", e);
             }
         };
         loadGames();
@@ -116,9 +113,6 @@ const PluginSettings = () => {
             } catch (e) {
                 console.error("GSE Achievements: Error loading config", e);
             }
-        } else {
-            setInterfacePath('');
-            setStatusPath('');
         }
         setMessage('');
     };
@@ -136,8 +130,6 @@ const PluginSettings = () => {
             });
             if (res.success) {
                 setMessage('Saved successfully!');
-            } else {
-                setMessage('Error saving config');
             }
         } catch (e) {
             setMessage('Error calling backend');
@@ -146,8 +138,7 @@ const PluginSettings = () => {
 
     return (
         <div style={{ padding: '20px', color: '#eee', maxWidth: '800px' }}>
-            <h2 style={{ borderBottom: '1px solid #444', paddingBottom: '10px' }}>Goldberg Achievements Tracker</h2>
-            
+            <h2>GSE Achievements Tracker</h2>
             <div style={{ marginTop: '20px' }}>
                 <label style={{ display: 'block', marginBottom: '5px' }}>Select Game:</label>
                 <select 
@@ -157,7 +148,7 @@ const PluginSettings = () => {
                 >
                     <option value="">-- Choose an installed game --</option>
                     {games.map(game => (
-                        <option key={game.appid} value={game.appid}>{game.display_name} ({game.appid})</option>
+                        <option key={game.appid} value={game.appid}>{game.display_name}</option>
                     ))}
                 </select>
             </div>
@@ -165,34 +156,30 @@ const PluginSettings = () => {
             {selectedAppId && (
                 <div style={{ marginTop: '20px' }}>
                     <div style={{ marginBottom: '15px' }}>
-                        <label style={{ display: 'block', marginBottom: '5px' }}>Achievements Interface Path (achievements.json):</label>
+                        <label>Interface Path:</label>
                         <input 
                             type="text" 
                             value={interfacePath} 
                             onChange={(e) => setInterfacePath(e.target.value)} 
-                            placeholder="D:\Games\MyGame\steam_settings\achievements.json"
-                            style={{ width: '100%', padding: '10px', background: '#1a1a1a', color: 'white', border: '1px solid #333', borderRadius: '4px' }}
+                            style={{ width: '100%', padding: '10px', background: '#1a1a1a', color: 'white', border: '1px solid #333' }}
                         />
                     </div>
-
                     <div style={{ marginBottom: '15px' }}>
-                        <label style={{ display: 'block', marginBottom: '5px' }}>Achievements Status Path (AppData/.../achievements.json):</label>
+                        <label>Status Path:</label>
                         <input 
                             type="text" 
                             value={statusPath} 
                             onChange={(e) => setStatusPath(e.target.value)} 
-                            placeholder="C:\Users\Name\AppData\Roaming\Goldberg SteamEmu Saves\123456\achievements.json"
-                            style={{ width: '100%', padding: '10px', background: '#1a1a1a', color: 'white', border: '1px solid #333', borderRadius: '4px' }}
+                            style={{ width: '100%', padding: '10px', background: '#1a1a1a', color: 'white', border: '1px solid #333' }}
                         />
                     </div>
-
                     <button 
                         onClick={handleSave}
-                        style={{ padding: '12px 24px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                        style={{ padding: '12px 24px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px' }}
                     >
-                        Save Configuration
+                        Save
                     </button>
-                    {message && <div style={{ marginTop: '15px', padding: '10px', background: message.includes('Error') ? '#d32f2f' : '#388e3c', borderRadius: '4px' }}>{message}</div>}
+                    {message && <div style={{ marginTop: '15px' }}>{message}</div>}
                 </div>
             )}
         </div>
@@ -200,24 +187,10 @@ const PluginSettings = () => {
 };
 
 export default definePlugin(() => {
-    
-    // In Millennium v2, AddWindowCreateHook is used to inject custom logic into windows
-    Millennium.AddWindowCreateHook((context: any) => {
-        console.log("GSE Achievements: Window Created", context);
-    });
+    console.log("GSE Achievements: Injected successfully.");
 
-    // Handle incoming events from backend
-    (window as any).Millennium?.on?.('achievement_earned', (data: any) => {
-        const { name, description, icon } = data;
-        if ((window as any).SteamClient?.Notifications?.DisplayNotification) {
-            (window as any).SteamClient.Notifications.DisplayNotification(
-                "Achievement Unlocked!",
-                name + "\n" + description,
-                icon || "",
-                ""
-            );
-        }
-    });
+    // Remove direct AddTab/AddSettingsPage calls from definePlugin as they might crash CEF if undefined
+    // Instead, rely on the returned object which is the standard way in v2.
 
     return {
         title: "GSE Achievements",

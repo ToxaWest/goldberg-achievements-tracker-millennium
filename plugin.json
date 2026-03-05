@@ -4,7 +4,7 @@
     "common_name": "Goldberg Achievements Tracker",
     "author": "West",
     "description": "Track and display achievements for Goldberg SteamEmu games.",
-    "version": "1.0.6",
+    "version": "1.0.8",
     "backendType": "python",
     "useBackend": true,
     "backend": "backend",
