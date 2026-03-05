@@ -1,10 +1,12 @@
 import { definePlugin, IconsModule } from '@steambrew/client';
+import React from 'react';
 
 const SettingsContent = () => {
-    // @ts-ignore
-    return window.SP_REACT.createElement('div', { style: { padding: '20px', color: 'white' } }, 
-        window.SP_REACT.createElement('h3', null, 'GSE Achievements'),
-        window.SP_REACT.createElement('p', null, 'Plugin is active.')
+    return (
+        <div style={{ padding: '20px', color: 'white' }}>
+            <h3>GSE Achievements Tracker</h3>
+            <p>Plugin is active. Settings logic will be added once stability is confirmed.</p>
+        </div>
     );
 };
 
@@ -13,7 +15,7 @@ export default definePlugin(() => {
 
     return {
         title: 'GSE Achievements',
-        icon: IconsModule.Settings, // Some versions expect the component, some the reference
-        content: SettingsContent,
+        icon: <IconsModule.Settings />,
+        content: <SettingsContent />,
     };
 });

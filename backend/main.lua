@@ -1,8 +1,17 @@
--- GSE Achievements: Minimal Lua Backend
-function _load()
-    print("GSE Achievements: Backend successfully loaded.")
+local function on_load()
+    print("GSE Achievements: Backend loaded.")
 end
 
-function _unload()
-    print("GSE Achievements: Backend unloading.")
+local function on_frontend_loaded()
+    print("GSE Achievements: Frontend loaded.")
 end
+
+local function on_unload()
+    print("GSE Achievements: Backend unloaded.")
+end
+
+return {
+    on_load = on_load,
+    on_frontend_loaded = on_frontend_loaded,
+    on_unload = on_unload
+}
