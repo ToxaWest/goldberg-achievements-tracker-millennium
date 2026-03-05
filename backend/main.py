@@ -25,7 +25,7 @@ class AchievementWatcher(threading.Thread):
                 with open(self.status_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
         except Exception as e:
-            print(f"Error loading status for {self.app_id}: {e}")
+            print(f"GSE Achievements: Error loading status for {self.app_id}: {e}")
         return {}
 
     def _get_mtime(self):
@@ -40,8 +40,9 @@ class AchievementWatcher(threading.Thread):
         self.running = False
 
     def run(self):
+        print(f"GSE Achievements: Started watcher thread for {self.app_id}")
         while self.running:
-            time.sleep(2) # Poll every 2 seconds
+            time.sleep(3) # Increased poll interval for safety
             if not self.running:
                 break
             mtime = self._get_mtime()
@@ -62,23 +63,37 @@ class Plugin:
         self.settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
         self.configs = {}
         self.watchers = {}
+        print("GSE Achievements: Plugin class instantiated")
+
+    def _load(self):
+        """Standard Millennium v2 entry point"""
+        print("GSE Achievements: _load() called")
+        # Run initialization in a separate thread to ensure Steam startup is never blocked
+        threading.Thread(target=self.run_logic, daemon=True).start()
 
     def _loader(self):
-        """Standard Millennium loader hook"""
-        print("Goldberg Achievements Tracker _loader called")
+        """Alias for older versions"""
+        print("GSE Achievements: _loader() called")
+        self._load()
 
     def load(self):
-        """Standard Millennium load hook - Moved initialization here to prevent Steam startup hangs"""
+        """Alias for older versions"""
+        print("GSE Achievements: load() called")
+        self._load()
+
+    def run_logic(self):
         try:
-            print("Goldberg Achievements Tracker: Initializing logic...")
+            # Give Steam a moment to settle
+            time.sleep(1)
+            print("GSE Achievements: Initializing logic...")
             self.configs = self._load_configs()
             self._setup_watchers()
-            print("Goldberg Achievements Tracker: Successfully loaded.")
+            print("GSE Achievements: Successfully loaded.")
         except Exception as e:
-            print(f"Error in Goldberg Achievements Tracker load: {e}")
+            print(f"GSE Achievements: Error in run_logic: {e}")
 
     def _unload(self):
-        print("Goldberg Achievements Tracker: Unloading...")
+        print("GSE Achievements: Unloading...")
         for watcher in self.watchers.values():
             watcher.stop()
 
@@ -88,7 +103,7 @@ class Plugin:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"Error loading settings.json: {e}")
+                print(f"GSE Achievements: Error loading settings.json: {e}")
         return {}
 
     def _save_configs(self):
@@ -96,7 +111,7 @@ class Plugin:
             with open(self.settings_path, 'w', encoding='utf-8') as f:
                 json.dump(self.configs, f, indent=4)
         except Exception as e:
-            print(f"Error saving settings.json: {e}")
+            print(f"GSE Achievements: Error saving settings.json: {e}")
 
     def _setup_watchers(self):
         for app_id, config in self.configs.items():
@@ -113,7 +128,7 @@ class Plugin:
         self.watchers[app_id] = watcher
 
     def _on_achievement_earned(self, app_id, ach_id):
-        print(f"Achievement earned: {app_id} - {ach_id}")
+        print(f"GSE Achievements: Achievement earned: {app_id} - {ach_id}")
         achievements = self.get_achievements(app_id)
         ach_meta = next((a for a in achievements if a['name'] == ach_id), None)
         display_name = ach_meta['display_name'] if ach_meta else ach_id
@@ -156,7 +171,7 @@ class Plugin:
                 with open(interface_path, 'r', encoding='utf-8') as f:
                     achievements = json.load(f)
             except Exception as e:
-                print(f"Error reading interface file: {e}")
+                print(f"GSE Achievements: Error reading interface file: {e}")
         
         status = {}
         if status_path and os.path.exists(status_path):
@@ -164,7 +179,7 @@ class Plugin:
                 with open(status_path, 'r', encoding='utf-8') as f:
                     status = json.load(f)
             except Exception as e:
-                print(f"Error reading status file: {e}")
+                print(f"GSE Achievements: Error reading status file: {e}")
         
         for ach in achievements:
             ach_id = ach.get('name')
