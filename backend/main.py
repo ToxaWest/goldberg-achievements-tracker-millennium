@@ -42,6 +42,8 @@ class AchievementWatcher(threading.Thread):
     def run(self):
         while self.running:
             time.sleep(2) # Poll every 2 seconds
+            if not self.running:
+                break
             mtime = self._get_mtime()
             if mtime > self.last_mtime:
                 self.last_mtime = mtime
@@ -57,24 +59,26 @@ class AchievementWatcher(threading.Thread):
 
 class Plugin:
     def __init__(self):
-        try:
-            self.settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
-            self.configs = self._load_configs()
-            self.watchers = {}
-            self._setup_watchers()
-            print("Goldberg Achievements Tracker Initialized")
-        except Exception as e:
-            print(f"Error in Plugin.__init__: {e}")
+        self.settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
+        self.configs = {}
+        self.watchers = {}
 
     def _loader(self):
         """Standard Millennium loader hook"""
         print("Goldberg Achievements Tracker _loader called")
 
     def load(self):
-        """Standard Millennium load hook"""
-        print("Goldberg Achievements Tracker load called")
+        """Standard Millennium load hook - Moved initialization here to prevent Steam startup hangs"""
+        try:
+            print("Goldberg Achievements Tracker: Initializing logic...")
+            self.configs = self._load_configs()
+            self._setup_watchers()
+            print("Goldberg Achievements Tracker: Successfully loaded.")
+        except Exception as e:
+            print(f"Error in Goldberg Achievements Tracker load: {e}")
 
     def _unload(self):
+        print("Goldberg Achievements Tracker: Unloading...")
         for watcher in self.watchers.values():
             watcher.stop()
 
@@ -83,13 +87,16 @@ class Plugin:
             try:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except:
-                pass
+            except Exception as e:
+                print(f"Error loading settings.json: {e}")
         return {}
 
     def _save_configs(self):
-        with open(self.settings_path, 'w', encoding='utf-8') as f:
-            json.dump(self.configs, f, indent=4)
+        try:
+            with open(self.settings_path, 'w', encoding='utf-8') as f:
+                json.dump(self.configs, f, indent=4)
+        except Exception as e:
+            print(f"Error saving settings.json: {e}")
 
     def _setup_watchers(self):
         for app_id, config in self.configs.items():
@@ -107,7 +114,6 @@ class Plugin:
 
     def _on_achievement_earned(self, app_id, ach_id):
         print(f"Achievement earned: {app_id} - {ach_id}")
-        # Fetch metadata to get the name
         achievements = self.get_achievements(app_id)
         ach_meta = next((a for a in achievements if a['name'] == ach_id), None)
         display_name = ach_meta['display_name'] if ach_meta else ach_id
@@ -145,8 +151,6 @@ class Plugin:
         status_path = config.get('status_path')
         
         achievements = []
-        
-        # Load metadata
         if interface_path and os.path.exists(interface_path):
             try:
                 with open(interface_path, 'r', encoding='utf-8') as f:
@@ -154,7 +158,6 @@ class Plugin:
             except Exception as e:
                 print(f"Error reading interface file: {e}")
         
-        # Load status
         status = {}
         if status_path and os.path.exists(status_path):
             try:
@@ -163,16 +166,13 @@ class Plugin:
             except Exception as e:
                 print(f"Error reading status file: {e}")
         
-        # Merge
         for ach in achievements:
             ach_id = ach.get('name')
             ach_status = status.get(ach_id, {})
             ach['unlocked'] = ach_status.get('unlocked', False)
             ach['unlock_time'] = ach_status.get('unlock_time', 0)
             
-            # Icon path resolution
             if 'icon' in ach:
-                # Typically icons are in 'img' folder next to achievements.json
                 base_dir = os.path.dirname(interface_path)
                 ach['icon_path'] = os.path.join(base_dir, 'img', ach['icon'])
             if 'icongray' in ach:
