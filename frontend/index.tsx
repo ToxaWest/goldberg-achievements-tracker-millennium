@@ -13,74 +13,72 @@ const PluginSettings = () => {
     const [message, setMessage] = React.useState('');
     const [isSaving, setIsSaving] = React.useState(false);
 
+    // Normalize path for Lua (Windows usually uses \, Lua/framework prefers /)
+    const normalizePath = (path: string) => {
+        return path.replace(/\\/g, '/').replace(/"/g, '').trim();
+    };
+
+    const handleBrowse = async (setter: (val: string) => void) => {
+        try {
+            // Attempt to use Steam's internal file picker if available
+            const client = (window as any).SteamClient;
+            if (client?.Window?.OpenFilePicker) {
+                const path = await client.Window.OpenFilePicker("Select achievements.json", "", false);
+                if (path) setter(normalizePath(path));
+            } else {
+                alert("File picker not supported in this Steam version. Please paste the path manually.");
+            }
+        } catch (e) {
+            console.error("GSE: Browse failed", e);
+        }
+    };
+
     const refreshPreview = async (id: string) => {
-        console.log("GSE: Refreshing preview for", id);
         try {
             const data = await getAchievements({ app_id: id });
-            console.log("GSE: Preview data received:", data);
             setAchievements(data || []);
-        } catch (e) { 
-            console.error("GSE: Preview refresh failed", e);
-            setAchievements([]); 
-        }
+        } catch (e) { setAchievements([]); }
     };
 
     const handleLoad = async () => {
         const id = appId.trim();
-        if (!id) {
-            alert("Please enter an AppID first.");
-            return;
-        }
-        console.log("GSE: Loading config for", id);
-        try {
-            const config = await getGameConfig({ app_id: id });
-            setInterfacePath(config.interface_path || '');
-            setStatusPath(config.status_path || '');
-            if (config.interface_path) {
-                refreshPreview(id);
-                setMessage('Configuration loaded.');
-            } else {
-                setAchievements([]);
-                setMessage('No saved config for this ID.');
-            }
-        } catch (e) {
-            console.error("GSE: Load failed", e);
-            setMessage('Error connecting to backend.');
+        if (!id) return;
+        const config = await getGameConfig({ app_id: id });
+        setInterfacePath(config.interface_path || '');
+        setStatusPath(config.status_path || '');
+        if (config.interface_path) {
+            refreshPreview(id);
+            setMessage('Config loaded.');
+        } else {
+            setAchievements([]);
+            setMessage('New configuration.');
         }
     };
 
     const handleSave = async () => {
         const id = appId.trim();
         if (!id || !interfacePath || !statusPath) {
-            alert("Please fill in all fields (AppID, Interface Path, and Status Path).");
+            alert("Please fill all fields.");
             return;
         }
 
-        console.log("GSE: Saving configuration...");
         setIsSaving(true);
-        setMessage('Saving...');
-
         try {
             const res = await saveGameConfig({ 
                 app_id: id, 
-                interface_path: interfacePath.trim(), 
-                status_path: statusPath.trim() 
+                interface_path: normalizePath(interfacePath), 
+                status_path: normalizePath(statusPath) 
             });
 
-            console.log("GSE: Save result:", res);
-
             if (res && res.success) {
-                setMessage('✅ Saved successfully!');
-                alert('Configuration saved to settings.json');
+                alert('✅ Saved successfully!');
+                setMessage('✅ Saved!');
                 refreshPreview(id);
             } else {
-                setMessage('❌ Backend failed to save file.');
-                alert('Error: Backend could not write the settings file.');
+                alert('❌ Backend failed to save.');
             }
         } catch (e) {
-            console.error("GSE: Save error", e);
-            setMessage('❌ Critical error during save.');
-            alert('Critical Error: Check dev console (F12).');
+            alert('❌ Error: ' + e);
         } finally {
             setIsSaving(false);
         }
@@ -89,80 +87,54 @@ const PluginSettings = () => {
     return React.createElement('div', { style: { padding: '20px', color: 'white' } },
         React.createElement('h3', null, 'GSE Achievements Tracker'),
         
-        React.createElement('div', { style: { background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '8px', marginBottom: '20px' } },
-            React.createElement('label', { style: { display: 'block', marginBottom: '5px', fontSize: '0.9em', color: '#ccc' } }, '1. Enter Game AppID:'),
-            React.createElement('div', { style: { display: 'flex', gap: '10px' } },
+        React.createElement('div', { style: { marginBottom: '20px' } },
+            React.createElement('label', null, '1. Steam AppID:'),
+            React.createElement('div', { style: { display: 'flex', gap: '10px', marginTop: '5px' } },
                 React.createElement('input', { 
-                    placeholder: "e.g. 123456", 
-                    value: appId, 
-                    onChange: (e:any)=>setAppId(e.target.value),
-                    style: { flexGrow: 1, background: '#111', color: 'white', padding: '10px', border: '1px solid #333', borderRadius: '4px' }
+                    placeholder: "AppID", value: appId, onChange: (e:any)=>setAppId(e.target.value),
+                    style: { flexGrow: 1, background: '#111', color: 'white', padding: '8px', border: '1px solid #333' }
                 }),
-                React.createElement('button', { 
-                    onClick: handleLoad, 
-                    style: { padding: '10px 20px', background: '#444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' } 
-                }, 'Load Settings')
+                React.createElement('button', { onClick: handleLoad, style: { padding: '8px 15px' } }, 'Load')
             )
         ),
 
-        appId && React.createElement('div', { style: { background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '8px' } },
+        appId && React.createElement('div', null,
             React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '5px', fontSize: '0.9em', color: '#ccc' } }, '2. Path to achievements.json (Interface):'),
-                React.createElement('input', { 
-                    placeholder: "steam_settings/achievements.json", 
-                    value: interfacePath, 
-                    onChange: (e:any)=>setInterfacePath(e.target.value),
-                    style: { width: '100%', background: '#111', color: 'white', padding: '10px', border: '1px solid #333', borderRadius: '4px', boxSizing: 'border-box' }
-                })
+                React.createElement('label', null, '2. Achievements Interface Path:'),
+                React.createElement('div', { style: { display: 'flex', gap: '5px', marginTop: '5px' } },
+                    React.createElement('input', { 
+                        placeholder: ".../steam_settings/achievements.json", 
+                        value: interfacePath, 
+                        onChange: (e:any)=>setInterfacePath(e.target.value),
+                        style: { flexGrow: 1, background: '#111', color: 'white', padding: '8px', border: '1px solid #333' }
+                    }),
+                    React.createElement('button', { onClick: () => handleBrowse(setInterfacePath), style: { padding: '8px' } }, '📁')
+                )
             ),
             React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', { style: { display: 'block', marginBottom: '5px', fontSize: '0.9em', color: '#ccc' } }, '3. Path to achievements.json (Status/Saves):'),
-                React.createElement('input', { 
-                    placeholder: "AppData/Roaming/Goldberg.../achievements.json", 
-                    value: statusPath, 
-                    onChange: (e:any)=>setStatusPath(e.target.value),
-                    style: { width: '100%', background: '#111', color: 'white', padding: '10px', border: '1px solid #333', borderRadius: '4px', boxSizing: 'border-box' }
-                })
+                React.createElement('label', null, '3. Achievements Status Path:'),
+                React.createElement('div', { style: { display: 'flex', gap: '5px', marginTop: '5px' } },
+                    React.createElement('input', { 
+                        placeholder: ".../GSE Saves/{ID}/achievements.json", 
+                        value: statusPath, 
+                        onChange: (e:any)=>setStatusPath(e.target.value),
+                        style: { flexGrow: 1, background: '#111', color: 'white', padding: '8px', border: '1px solid #333' }
+                    }),
+                    React.createElement('button', { onClick: () => handleBrowse(setStatusPath), style: { padding: '8px' } }, '📁')
+                )
             ),
             React.createElement('button', { 
                 onClick: handleSave, 
                 disabled: isSaving,
-                style: { 
-                    width: '100%', 
-                    background: isSaving ? '#555' : '#2196f3', 
-                    color: 'white', 
-                    padding: '12px', 
-                    border: 'none', 
-                    borderRadius: '4px', 
-                    cursor: isSaving ? 'default' : 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '1em'
-                } 
+                style: { width: '100%', background: '#2196f3', color: 'white', padding: '12px', border: 'none', fontWeight: 'bold' } 
             }, isSaving ? 'Saving...' : 'Save Configuration')
         ),
 
-        message && React.createElement('div', { 
-            style: { marginTop: '15px', padding: '10px', borderRadius: '4px', background: 'rgba(0,0,0,0.2)', color: message.includes('✅') ? '#4caf50' : '#ff9800' } 
-        }, message),
-
-        achievements.length > 0 && React.createElement('div', { style: { marginTop: '25px', borderTop: '1px solid #333', paddingTop: '15px' } },
-            React.createElement('h4', { style: { marginBottom: '10px' } }, 'Achievements Preview (' + achievements.length + ' found):'),
-            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px' } },
-                achievements.map(a => React.createElement('div', { 
-                    key: a.name, 
-                    style: { 
-                        padding: '8px', 
-                        background: 'rgba(255,255,255,0.03)', 
-                        borderRadius: '4px',
-                        opacity: a.unlocked ? 1 : 0.4, 
-                        fontSize: '0.85em',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
-                    } 
-                }, 
-                    React.createElement('span', null, a.unlocked ? '✅' : '🔒'),
-                    React.createElement('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, a.display_name || a.name)
+        achievements.length > 0 && React.createElement('div', { style: { marginTop: '20px' } },
+            React.createElement('h4', null, 'Found ' + achievements.length + ' achievements'),
+            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '5px' } },
+                achievements.map(a => React.createElement('div', { key: a.name, style: { fontSize: '0.8em', color: a.unlocked ? '#4caf50' : '#666' } }, 
+                    (a.unlocked ? '✅ ' : '🔒 ') + (a.display_name || a.name)
                 ))
             )
         )
