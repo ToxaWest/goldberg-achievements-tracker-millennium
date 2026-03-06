@@ -1,4 +1,21 @@
 local millennium = require("millennium")
+local json = require("json")
+
+-- Diagnostic: Print all available millennium functions
+print("GSE Achievements: Available millennium functions:")
+for k, v in pairs(millennium) do
+    print(" - " .. tostring(k) .. " (" .. type(v) .. ")")
+end
+
+-- Attempt to find the plugin directory using debug info
+local info = debug.getinfo(1, "S")
+local script_path = info.source:sub(2) -- Remove the '@' prefix
+local plugin_dir = script_path:match("(.*[\\/])backend[\\/]") or script_path:match("(.*[\\/])") or "."
+print("GSE Achievements: Detected plugin directory: " .. plugin_dir)
+
+local settings_path = plugin_dir .. "/settings.json"
+local configs = {}
+local last_status_map = {}
 
 -- Defensive module loading
 local function get_module(names)
@@ -10,28 +27,18 @@ local function get_module(names)
 end
 
 local fs = get_module({"fs", "filesystem"})
-local json = get_module({"json", "cjson"})
+local cjson = get_module({"json", "cjson"})
 
--- Determine absolute settings path if possible
-local plugin_path = "."
-if millennium.get_plugin_path then
-    plugin_path = millennium.get_plugin_path()
-end
-local settings_path = plugin_path .. "/settings.json"
-
-local configs = {}
-local last_status_map = {}
-
--- Fallback file helpers
+-- Standard Lua file helpers
 local function file_exists(path)
-    if fs and fs.exists then return fs.exists(path) end
+    if not path or path == "" then return false end
     local f = io.open(path, "rb")
     if f then f:close() end
     return f ~= nil
 end
 
 local function read_file(path)
-    if fs and fs.read_file then return fs.read_file(path) end
+    if not path or path == "" then return nil end
     local f = io.open(path, "rb")
     if not f then return nil end
     local content = f:read("*all")
@@ -40,18 +47,10 @@ local function read_file(path)
 end
 
 local function write_file(path, content)
-    -- Normalize path separators for Windows
-    path = path:gsub("\\", "/")
-    
-    if fs and fs.write_file then 
-        local success = fs.write_file(path, content)
-        if success then return true end
-        print("GSE Achievements WARN: fs.write_file failed for " .. path .. ", trying io.open")
-    end
-    
+    if not path or path == "" then return false end
     local f = io.open(path, "wb")
     if not f then 
-        print("GSE Achievements ERROR: Could not open file for writing: " .. path)
+        print("GSE Achievements ERROR: Could not open file for writing: " .. tostring(path))
         return false 
     end
     f:write(content)
@@ -60,14 +59,14 @@ local function write_file(path, content)
 end
 
 local function decode_json(content)
-    if not content or not json then return nil end
-    local status, data = pcall(json.decode, content)
+    if not content or not cjson then return nil end
+    local status, data = pcall(cjson.decode, content)
     return status and data or nil
 end
 
 local function encode_json(data)
-    if not json then return "{}" end
-    local status, content = pcall(json.encode, data)
+    if not cjson then return "{}" end
+    local status, content = pcall(cjson.encode, data)
     return status and content or "{}"
 end
 
@@ -76,8 +75,7 @@ local function check_achievements()
     for app_id, config in pairs(configs) do
         local status_path = config.status_path
         if status_path and file_exists(status_path) then
-            local content = read_file(status_path)
-            local current_status = decode_json(content)
+            local current_status = decode_json(read_file(status_path))
             if current_status then
                 local last_status = last_status_map[app_id] or {}
                 for ach_id, data in pairs(current_status) do
@@ -86,7 +84,6 @@ local function check_achievements()
                     
                     if is_unlocked and not was_unlocked then
                         print("GSE Achievements: Achievement earned! " .. app_id .. " - " .. ach_id)
-                        
                         local display_name = ach_id
                         local description = ""
                         local icon = ""
@@ -117,7 +114,7 @@ local function check_achievements()
     end
 end
 
--- API called from frontend
+-- Exported functions
 local function get_game_config(payload)
     local app_id = tostring(payload.app_id)
     return configs[app_id] or {}
@@ -156,30 +153,40 @@ end
 
 -- Lifecycle
 local function on_load()
-    print("GSE Achievements: Backend starting...")
-    print("GSE Achievements: Settings path resolve to: " .. settings_path)
-    
-    local content = read_file(settings_path)
-    if content then
-        local data = decode_json(content)
-        if data then configs = data end
-    end
-    
-    for app_id, config in pairs(configs) do
-        local status_data = decode_json(read_file(config.status_path))
-        if status_data then last_status_map[app_id] = status_data end
-    end
-    
-    if Steam and Steam.SetInterval then
-        Steam.SetInterval(3000, check_achievements)
-    end
+    pcall(function()
+        print("GSE Achievements: Backend starting...")
+        
+        local content = read_file(settings_path)
+        if content then
+            local data = decode_json(content)
+            if data then configs = data end
+        end
+        
+        for app_id, config in pairs(configs) do
+            local status_data = decode_json(read_file(config.status_path))
+            if status_data then last_status_map[app_id] = status_data end
+        end
+        
+        if Steam and Steam.SetInterval then
+            Steam.SetInterval(3000, check_achievements)
+        end
+    end)
     
     millennium.ready()
-    print("GSE Achievements: Backend ready.")
+end
+
+local function on_frontend_loaded()
+    print("GSE Achievements: Frontend loaded.")
+end
+
+local function on_unload()
+    print("GSE Achievements: Backend unloading.")
 end
 
 return {
     on_load = on_load,
+    on_frontend_loaded = on_frontend_loaded,
+    on_unload = on_unload,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
     get_achievements = get_achievements
