@@ -1,33 +1,66 @@
 local millennium = require("millennium")
-local fs = require("filesystem")
-local json = require("cjson")
+
+-- Defensive module loading
+local function get_module(names)
+    for _, name in ipairs(names) do
+        local status, mod = pcall(require, name)
+        if status then return mod end
+    end
+    return nil
+end
+
+local fs = get_module({"fs", "filesystem"})
+local json = get_module({"json", "cjson"})
 
 local settings_path = "settings.json"
 local configs = {}
 local last_status_map = {}
 
--- Utility to read and parse JSON using framework modules
-local function read_json(path)
-    if not fs.exists(path) then return nil end
-    local content = fs.read_file(path)
-    if not content then return nil end
+-- Fallback file helpers using standard Lua io if fs is missing
+local function file_exists(path)
+    if fs and fs.exists then return fs.exists(path) end
+    local f = io.open(path, "rb")
+    if f then f:close() end
+    return f ~= nil
+end
+
+local function read_file(path)
+    if fs and fs.read_file then return fs.read_file(path) end
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local content = f:read("*all")
+    f:close()
+    return content
+end
+
+local function write_file(path, content)
+    if fs and fs.write_file then return fs.write_file(path, content) end
+    local f = io.open(path, "wb")
+    if not f then return false end
+    f:write(content)
+    f:close()
+    return true
+end
+
+local function decode_json(content)
+    if not content or not json then return nil end
     local status, data = pcall(json.decode, content)
     return status and data or nil
 end
 
--- Utility to save JSON using framework modules
-local function save_json(path, data)
+local function encode_json(data)
+    if not json then return "{}" end
     local status, content = pcall(json.encode, data)
-    if not status then return false end
-    return fs.write_file(path, content)
+    return status and content or "{}"
 end
 
 -- Achievement check logic
 local function check_achievements()
     for app_id, config in pairs(configs) do
         local status_path = config.status_path
-        if status_path and fs.exists(status_path) then
-            local current_status = read_json(status_path)
+        if status_path and file_exists(status_path) then
+            local content = read_file(status_path)
+            local current_status = decode_json(content)
             if current_status then
                 local last_status = last_status_map[app_id] or {}
                 for ach_id, data in pairs(current_status) do
@@ -41,7 +74,7 @@ local function check_achievements()
                         local description = ""
                         local icon = ""
                         
-                        local meta = read_json(config.interface_path)
+                        local meta = decode_json(read_file(config.interface_path))
                         if meta then
                             for _, ach in ipairs(meta) do
                                 if ach.name == ach_id then
@@ -67,7 +100,7 @@ local function check_achievements()
     end
 end
 
--- Exported functions
+-- API called from frontend
 local function get_game_config(payload)
     local app_id = tostring(payload.app_id)
     return configs[app_id] or {}
@@ -76,10 +109,9 @@ end
 local function save_game_config(payload)
     local app_id = tostring(payload.app_id)
     configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
+    local success = write_file(settings_path, encode_json(configs))
     
-    local success = save_json(settings_path, configs)
-    
-    local status = read_json(payload.status_path)
+    local status = decode_json(read_file(payload.status_path))
     if status then last_status_map[app_id] = status end
     return { success = success }
 end
@@ -89,8 +121,8 @@ local function get_achievements(payload)
     local config = configs[app_id]
     if not config then return {} end
     
-    local meta = read_json(config.interface_path) or {}
-    local status = read_json(config.status_path) or {}
+    local meta = decode_json(read_file(config.interface_path)) or {}
+    local status = decode_json(read_file(config.status_path)) or {}
     
     for _, ach in ipairs(meta) do
         local ach_status = status[ach.name] or {}
@@ -105,25 +137,29 @@ end
 
 -- Lifecycle
 local function on_load()
-    local pstatus, err = pcall(function()
-        print("GSE Achievements: Backend starting...")
-        
-        local data = read_json(settings_path)
-        if data then configs = data end
-        
-        for app_id, config in pairs(configs) do
-            local status_data = read_json(config.status_path)
-            if status_data then last_status_map[app_id] = status_data end
-        end
-        
-        if Steam and Steam.SetInterval then
-            Steam.SetInterval(3000, check_achievements)
-        end
-    end)
+    print("GSE Achievements: Backend starting...")
     
-    if not pstatus then print("GSE Achievements ERROR: " .. tostring(err)) end
+    -- Diagnostic
+    if not fs then print("GSE Achievements WARN: fs/filesystem module NOT FOUND") end
+    if not json then print("GSE Achievements WARN: json/cjson module NOT FOUND") end
+
+    local content = read_file(settings_path)
+    if content then
+        local data = decode_json(content)
+        if data then configs = data end
+    end
+    
+    for app_id, config in pairs(configs) do
+        local status_data = decode_json(read_file(config.status_path))
+        if status_data then last_status_map[app_id] = status_data end
+    end
+    
+    if Steam and Steam.SetInterval then
+        Steam.SetInterval(3000, check_achievements)
+    end
     
     millennium.ready()
+    print("GSE Achievements: Backend ready.")
 end
 
 return {
