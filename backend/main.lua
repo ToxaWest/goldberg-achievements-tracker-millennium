@@ -1,9 +1,8 @@
 local millennium = require("millennium")
 local json = require("json")
 
--- Get the absolute path to this plugin's folder
-local plugin_path = millennium.get_plugin_path()
-local settings_path = plugin_path .. "/settings.json"
+-- Use a simple relative path for settings
+local settings_path = "settings.json"
 
 local configs = {}
 local last_status_map = {}
@@ -28,10 +27,7 @@ end
 local function write_file(path, content)
     if not path or path == "" then return false end
     local f = io.open(path, "wb")
-    if not f then 
-        print("GSE Achievements ERROR: Could not open file for writing: " .. tostring(path))
-        return false 
-    end
+    if not f then return false end
     f:write(content)
     f:close()
     return true
@@ -96,17 +92,13 @@ end
 -- Exported functions
 local function get_game_config(payload)
     local app_id = tostring(payload.app_id)
-    local config = configs[app_id] or {}
-    print("GSE Achievements: get_game_config for " .. app_id .. " -> " .. (config.interface_path or "empty"))
-    return config
+    return configs[app_id] or {}
 end
 
 local function save_game_config(payload)
     local app_id = tostring(payload.app_id)
     configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
-    
     local success = write_file(settings_path, encode_json(configs))
-    print("GSE Achievements: Save " .. (success and "SUCCESS" or "FAILED") .. " to " .. settings_path)
     
     local status = decode_json(read_file(payload.status_path))
     if status then last_status_map[app_id] = status end
@@ -134,29 +126,30 @@ end
 
 -- Lifecycle
 local function on_load()
-    print("GSE Achievements: Backend starting...")
-    print("GSE Achievements: Plugin path: " .. plugin_path)
-    
-    local content = read_file(settings_path)
-    if content then
-        local data = decode_json(content)
-        if data then 
-            configs = data 
-            print("GSE Achievements: Loaded configurations from disk.")
+    local status, err = pcall(function()
+        print("GSE Achievements: Backend starting...")
+        
+        local content = read_file(settings_path)
+        if content then
+            local data = decode_json(content)
+            if data then configs = data end
         end
-    end
+        
+        for app_id, config in pairs(configs) do
+            local status_data = decode_json(read_file(config.status_path))
+            if status_data then last_status_map[app_id] = status_data end
+        end
+        
+        if Steam and Steam.SetInterval then
+            Steam.SetInterval(3000, check_achievements)
+        end
+    end)
     
-    for app_id, config in pairs(configs) do
-        local status = decode_json(read_file(config.status_path))
-        if status then last_status_map[app_id] = status end
-    end
+    if not status then print("GSE Achievements ERROR: " .. tostring(err)) end
     
-    if Steam and Steam.SetInterval then
-        Steam.SetInterval(3000, check_achievements)
-    end
-    
+    -- ALWAYS signal ready to prevent Steam hang
     millennium.ready()
-    print("GSE Achievements: Backend ready.")
+    print("GSE Achievements: Backend ready handshake complete.")
 end
 
 return {
