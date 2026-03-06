@@ -1,5 +1,10 @@
+local millennium = require("millennium")
+
 local function on_load()
     print("GSE Achievements: Backend loaded.")
+    -- CRITICAL: Signal to Millennium that the backend is ready. 
+    -- Without this, the loader hangs.
+    millennium.ready()
 end
 
 local function on_frontend_loaded()
