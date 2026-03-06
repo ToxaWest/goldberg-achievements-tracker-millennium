@@ -84,14 +84,17 @@ const PluginSettings = () => {
             return;
         }
         try {
-            await saveGameConfig({ app_id: appId, interface_path: interfacePath, status_path: statusPath });
-            setMessage('Saved successfully!');
+            const res = await saveGameConfig({ app_id: appId, interface_path: interfacePath, status_path: statusPath });
+            if (res.success) {
+                setMessage('Saved successfully! (Settings will persist after restart)');
+            } else {
+                setMessage('Failed to save settings to disk.');
+            }
         } catch (e) { setMessage('Error saving.'); }
     };
 
     return React.createElement('div', { style: { padding: '20px', color: 'white' } },
         React.createElement('h2', null, 'GSE Achievements Tracker'),
-        React.createElement('p', { style: { color: '#aaa', fontSize: '0.9em' } }, 'Enter the Steam AppID of the game you want to configure.'),
         
         React.createElement('div', { style: { marginTop: '20px' } },
             React.createElement('label', null, 'Steam AppID:'),
@@ -111,55 +114,53 @@ const PluginSettings = () => {
 
         appId && React.createElement('div', { style: { marginTop: '20px' } },
             React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', null, 'Achievements Interface (steam_settings/achievements.json):'),
+                React.createElement('label', null, 'Interface Path:'),
                 React.createElement('input', { 
-                    type: "text", placeholder: "C:\\Games\\MyGame\\steam_settings\\achievements.json", 
+                    type: "text", 
                     value: interfacePath, 
                     onChange: (e: any) => setInterfacePath(e.target.value), 
-                    style: { width: '100%', padding: '8px', marginTop: '5px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
+                    style: { width: '100%', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
                 })
             ),
             React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', null, 'Achievements Status (AppData/.../achievements.json):'),
+                React.createElement('label', null, 'Status Path:'),
                 React.createElement('input', { 
-                    type: "text", placeholder: "C:\\Users\\...\\Goldberg SteamEmu Saves\\123\\achievements.json", 
+                    type: "text", 
                     value: statusPath, 
                     onChange: (e: any) => setStatusPath(e.target.value), 
-                    style: { width: '100%', padding: '8px', marginTop: '5px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
+                    style: { width: '100%', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
                 })
             ),
             React.createElement('button', { 
                 onClick: handleSave, 
                 style: { padding: '10px 25px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' } 
-            }, "Save Configuration")
+            }, "Save")
         ),
-        message && React.createElement('div', { style: { marginTop: '15px', color: message.includes('Saved') ? '#4caf50' : '#ff9800' } }, message)
+        message && React.createElement('div', { style: { marginTop: '15px', color: message.includes('success') ? '#4caf50' : '#ff9800' } }, message)
     );
 };
 
 export default definePlugin(() => {
-    console.log("GSE Achievements: Plugin initialized.");
-
-    // Notification listener
-    (window as any).Millennium?.on?.('achievement_earned', (data: any) => {
+    // Add tab to Library details page - Using SP Desktop hook which is more reliable
+    Millennium.AddWindowCreateHook?.((context: any) => {
+        if (context.m_strName !== 'SP Desktop') return;
+        
+        // In SP Desktop mode, Millennium should handle AddTab better
         try {
-            (window as any).SteamClient?.Notifications?.DisplayNotification("Achievement Unlocked!", data.name + "\n" + data.description, data.icon || "", "");
-        } catch (e) {}
-    });
-
-    // Try to add a tab to Library details page if the API is available
-    try {
-        if ((Millennium as any).AddTab) {
             (Millennium as any).AddTab({
                 name: "Achievements (GSE)",
                 id: "gse-achievements-tab",
                 view: "LibraryAppDetails",
                 content: (props: any) => React.createElement(AchievementsTab, { appId: (Millennium as any).getAppId?.() })
             });
-        }
-    } catch (e) {
-        console.warn("GSE Achievements: Could not register Library tab. Fallback to Settings UI.");
-    }
+        } catch (e) {}
+    });
+
+    (window as any).Millennium?.on?.('achievement_earned', (data: any) => {
+        try {
+            (window as any).SteamClient?.Notifications?.DisplayNotification("Achievement Unlocked!", data.name + "\n" + data.description, data.icon || "", "");
+        } catch (e) {}
+    });
 
     return {
         title: "GSE Achievements",

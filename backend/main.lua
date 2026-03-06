@@ -1,18 +1,23 @@
 local millennium = require("millennium")
 local json = require("json")
 
-local settings_path = "settings.json"
+-- Get the absolute path to this plugin's folder
+local plugin_path = millennium.get_plugin_path()
+local settings_path = plugin_path .. "/settings.json"
+
 local configs = {}
 local last_status_map = {}
 
 -- Standard Lua file helpers
 local function file_exists(path)
+    if not path or path == "" then return false end
     local f = io.open(path, "rb")
     if f then f:close() end
     return f ~= nil
 end
 
 local function read_file(path)
+    if not path or path == "" then return nil end
     local f = io.open(path, "rb")
     if not f then return nil end
     local content = f:read("*all")
@@ -21,8 +26,12 @@ local function read_file(path)
 end
 
 local function write_file(path, content)
+    if not path or path == "" then return false end
     local f = io.open(path, "wb")
-    if not f then return false end
+    if not f then 
+        print("GSE Achievements ERROR: Could not open file for writing: " .. tostring(path))
+        return false 
+    end
     f:write(content)
     f:close()
     return true
@@ -86,17 +95,22 @@ end
 
 -- Exported functions
 local function get_game_config(payload)
-    return configs[tostring(payload.app_id)] or {}
+    local app_id = tostring(payload.app_id)
+    local config = configs[app_id] or {}
+    print("GSE Achievements: get_game_config for " .. app_id .. " -> " .. (config.interface_path or "empty"))
+    return config
 end
 
 local function save_game_config(payload)
     local app_id = tostring(payload.app_id)
     configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
-    write_file(settings_path, encode_json(configs))
+    
+    local success = write_file(settings_path, encode_json(configs))
+    print("GSE Achievements: Save " .. (success and "SUCCESS" or "FAILED") .. " to " .. settings_path)
     
     local status = decode_json(read_file(payload.status_path))
     if status then last_status_map[app_id] = status end
-    return { success = true }
+    return { success = success }
 end
 
 local function get_achievements(payload)
@@ -121,15 +135,22 @@ end
 -- Lifecycle
 local function on_load()
     print("GSE Achievements: Backend starting...")
-    local data = decode_json(read_file(settings_path))
-    if data then configs = data end
+    print("GSE Achievements: Plugin path: " .. plugin_path)
+    
+    local content = read_file(settings_path)
+    if content then
+        local data = decode_json(content)
+        if data then 
+            configs = data 
+            print("GSE Achievements: Loaded configurations from disk.")
+        end
+    end
     
     for app_id, config in pairs(configs) do
         local status = decode_json(read_file(config.status_path))
         if status then last_status_map[app_id] = status end
     end
     
-    -- Using Steam global timer if available
     if Steam and Steam.SetInterval then
         Steam.SetInterval(3000, check_achievements)
     end
@@ -138,18 +159,8 @@ local function on_load()
     print("GSE Achievements: Backend ready.")
 end
 
-local function on_frontend_loaded()
-    print("GSE Achievements: Frontend loaded.")
-end
-
-local function on_unload()
-    print("GSE Achievements: Backend unloaded.")
-end
-
 return {
     on_load = on_load,
-    on_frontend_loaded = on_frontend_loaded,
-    on_unload = on_unload,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
     get_achievements = get_achievements
