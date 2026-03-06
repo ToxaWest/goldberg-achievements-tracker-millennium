@@ -4,17 +4,18 @@
   "private": true,
   "scripts": {
     "dev": "millennium-ttc --build dev",
+    "watch": "millennium-ttc --build dev --watch",
     "build": "millennium-ttc --build prod"
   },
   "dependencies": {
-    "@steambrew/api": "^5.5.3",
-    "@steambrew/client": "^5.5.3",
-    "@steambrew/webkit": "^5.5.3"
+    "@steambrew/api": "latest",
+    "@steambrew/client": "latest",
+    "@steambrew/webkit": "latest"
   },
   "devDependencies": {
-    "@steambrew/ttc": "^2.7.3",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "typescript": "^5.0.0"
+    "@steambrew/ttc": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
   }
 }

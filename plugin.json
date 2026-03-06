@@ -3,6 +3,6 @@
     "name": "gse-achievements-tracker",
     "common_name": "GSE Achievements Tracker",
     "description": "Goldberg Achievement Tracker for Millennium",
-    "version": "1.1.9",
+    "version": "1.2.0",
     "backendType": "lua"
 }

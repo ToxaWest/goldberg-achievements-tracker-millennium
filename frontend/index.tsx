@@ -5,7 +5,7 @@ const SettingsContent = () => {
     return (
         <div style={{ padding: '20px', color: 'white' }}>
             <h3>GSE Achievements Tracker</h3>
-            <p>Plugin is active. Settings logic will be added once stability is confirmed.</p>
+            <p>Plugin is active.</p>
         </div>
     );
 };

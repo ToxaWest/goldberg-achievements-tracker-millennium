@@ -1,18 +1,18 @@
 {
-    "compilerOptions": {
-        "target": "ESNext",
-        "module": "ESNext",
-        "moduleResolution": "node",
-        "jsx": "react",
-        "jsxFactory": "React.createElement",
-        "jsxFragmentFactory": "React.Fragment",
-        "strict": false,
-        "noImplicitAny": false,
-        "esModuleInterop": true,
-        "skipLibCheck": true,
-        "forceConsistentCasingInFileNames": true,
-        "outDir": ".millennium/Dist",
-        "baseUrl": "."
-    },
-    "include": ["frontend/**/*"]
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true
+  },
+  "include": ["frontend/**/*"],
+  "exclude": ["node_modules"]
 }
