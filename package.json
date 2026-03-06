@@ -1,6 +1,6 @@
 {
   "name": "goldberg-achievements-tracker",
-  "version": "1.0.3",
+  "version": "1.3.0",
   "private": true,
   "scripts": {
     "dev": "millennium-ttc --build dev",
@@ -8,14 +8,14 @@
     "build": "millennium-ttc --build prod"
   },
   "dependencies": {
-    "@steambrew/api": "latest",
-    "@steambrew/client": "latest",
-    "@steambrew/webkit": "latest"
+    "@steambrew/api": "^5.5.3",
+    "@steambrew/client": "^5.5.3",
+    "@steambrew/webkit": "^5.5.3"
   },
   "devDependencies": {
-    "@steambrew/ttc": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "typescript": "latest"
+    "@steambrew/ttc": "^2.7.3",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.0.0"
   }
 }
