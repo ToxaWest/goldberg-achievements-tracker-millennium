@@ -46,7 +46,6 @@ end
 
 local function write_file(path, content)
     if not path or path == "" then return false end
-    -- Fallback to standard io as it's more direct
     local f = io.open(path, "wb")
     if not f then 
         print("GSE Achievements ERROR: Could not open settings for writing: " .. tostring(path))
@@ -123,12 +122,8 @@ local function save_game_config(payload)
     local app_id = tostring(payload.app_id)
     configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
     
+    print("GSE Achievements: Saving config to " .. settings_path)
     local success = write_file(settings_path, encode_json(configs))
-    
-    -- Also use the framework's internal storage as a backup
-    if millennium.set_user_settings_key then
-        millennium.set_user_settings_key("configs", encode_json(configs))
-    end
     
     local status = decode_json(read_file(payload.status_path))
     if status then last_status_map[app_id] = status end
@@ -158,16 +153,13 @@ end
 local function on_load()
     print("GSE Achievements: Backend starting...")
     
-    -- Try loading from file first
+    -- Load from file using standard IO
     local content = read_file(settings_path)
     if content then
         local data = decode_json(content)
-        if data then configs = data end
-    elseif millennium.get_user_settings then
-        -- Fallback to framework storage
-        local data = decode_json(millennium.get_user_settings())
-        if data and data.configs then
-            configs = decode_json(data.configs) or {}
+        if data then 
+            configs = data 
+            print("GSE Achievements: Configurations loaded from disk.")
         end
     end
     
@@ -188,9 +180,14 @@ local function on_frontend_loaded()
     print("GSE Achievements: Frontend loaded.")
 end
 
+local function on_unload()
+    print("GSE Achievements: Backend unloading.")
+end
+
 return {
     on_load = on_load,
     on_frontend_loaded = on_frontend_loaded,
+    on_unload = on_unload,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
     get_achievements = get_achievements
