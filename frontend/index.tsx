@@ -86,9 +86,9 @@ const PluginSettings = () => {
         try {
             const res = await saveGameConfig({ app_id: appId, interface_path: interfacePath, status_path: statusPath });
             if (res.success) {
-                setMessage('Saved successfully! (Settings will persist after restart)');
+                setMessage('Saved successfully!');
             } else {
-                setMessage('Failed to save settings to disk.');
+                setMessage('Failed to save to plugin folder.');
             }
         } catch (e) { setMessage('Error saving.'); }
     };
@@ -136,16 +136,14 @@ const PluginSettings = () => {
                 style: { padding: '10px 25px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' } 
             }, "Save")
         ),
-        message && React.createElement('div', { style: { marginTop: '15px', color: message.includes('success') ? '#4caf50' : '#ff9800' } }, message)
+        message && React.createElement('div', { style: { marginTop: '15px', color: message.includes('Saved') ? '#4caf50' : '#ff9800' } }, message)
     );
 };
 
 export default definePlugin(() => {
-    // Add tab to Library details page - Using SP Desktop hook which is more reliable
+    // Add tab hook
     Millennium.AddWindowCreateHook?.((context: any) => {
         if (context.m_strName !== 'SP Desktop') return;
-        
-        // In SP Desktop mode, Millennium should handle AddTab better
         try {
             (Millennium as any).AddTab({
                 name: "Achievements (GSE)",
