@@ -22,6 +22,7 @@ const AchievementsTab = ({ appId }: { appId: string }) => {
 
     React.useEffect(() => {
         const fetchData = async () => {
+            if (!appId) return;
             setLoading(true);
             try {
                 const gameConfig = await getGameConfig({ app_id: appId });
@@ -30,14 +31,14 @@ const AchievementsTab = ({ appId }: { appId: string }) => {
                     const data = await getAchievements({ app_id: appId });
                     setAchievements(data);
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) { console.error("GSE: Error in tab", e); }
             setLoading(false);
         };
         fetchData();
     }, [appId]);
 
-    if (loading) return React.createElement('div', { style: { padding: '20px', color: 'white' } }, 'Loading...');
-    if (!config?.interface_path) return React.createElement('div', { style: { padding: '20px', color: '#ccc' } }, 'Not configured for this game.');
+    if (loading) return React.createElement('div', { style: { padding: '20px', color: 'white' } }, 'Loading Achievements...');
+    if (!config?.interface_path) return React.createElement('div', { style: { padding: '20px', color: '#ccc' } }, 'Not configured. Please set paths in Plugin Settings.');
 
     return React.createElement('div', { style: { padding: '20px', overflowY: 'auto', maxHeight: '100%' } },
         React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '15px' } },
@@ -46,7 +47,11 @@ const AchievementsTab = ({ appId }: { appId: string }) => {
                     background: 'rgba(0,0,0,0.4)', padding: '12px', borderRadius: '10px', display: 'flex', alignItems: 'center',
                     opacity: ach.unlocked ? 1 : 0.5, filter: ach.unlocked ? 'none' : 'grayscale(0.8)'
                 }}, 
-                    React.createElement('img', { src: ach.unlocked ? ach.icon_path : ach.icongray_path, style: { width: '64px', height: '64px', marginRight: '15px' } }),
+                    React.createElement('img', { 
+                        src: ach.unlocked ? ach.icon_path : ach.icongray_path, 
+                        style: { width: '64px', height: '64px', marginRight: '15px', borderRadius: '4px' },
+                        onError: (e: any) => { e.target.src = 'https://community.cloudflare.steamstatic.com/public/images/apps/unknown.png'; }
+                    }),
                     React.createElement('div', null,
                         React.createElement('div', { style: { fontWeight: 'bold', color: 'white' } }, ach.display_name),
                         React.createElement('div', { style: { fontSize: '0.8em', color: '#aaa' } }, ach.description)
@@ -58,103 +63,103 @@ const AchievementsTab = ({ appId }: { appId: string }) => {
 };
 
 const PluginSettings = () => {
-    const [games, setGames] = React.useState<any[]>([]);
-    const [selectedAppId, setSelectedAppId] = React.useState('');
+    const [appId, setAppId] = React.useState('');
     const [interfacePath, setInterfacePath] = React.useState('');
     const [statusPath, setStatusPath] = React.useState('');
+    const [message, setMessage] = React.useState('');
 
-    React.useEffect(() => {
-        const fetchGamesList = async () => {
-            try {
-                let list: any[] = [];
-                const client = (window as any).SteamClient;
-                
-                if (client?.Apps?.GetList) {
-                    list = await client.Apps.GetList();
-                } else if (client?.Apps?.GetAllApps) {
-                    list = await client.Apps.GetAllApps();
-                }
-
-                if (list && Array.isArray(list)) {
-                    const installed = list
-                        .filter((a: any) => a.is_installed || a.bIsInstalled)
-                        .map((a: any) => ({
-                            appid: a.appid || a.unAppID,
-                            display_name: a.display_name || a.strName
-                        }))
-                        .sort((a, b) => a.display_name.localeCompare(b.display_name));
-                    
-                    setGames(installed);
-                } else {
-                    console.error("GSE Achievements: Could not retrieve app list from SteamClient.");
-                }
-            } catch (e) {
-                console.error("GSE Achievements: Error fetching games list", e);
-            }
-        };
-        fetchGamesList();
-    }, []);
-
-    const handleGameChange = async (appId: string) => {
-        setSelectedAppId(appId);
-        if (appId) {
-            try {
-                const config = await getGameConfig({ app_id: appId });
-                setInterfacePath(config.interface_path || '');
-                setStatusPath(config.status_path || '');
-            } catch (e) { console.error(e); }
-        } else {
-            setInterfacePath('');
-            setStatusPath('');
-        }
+    const handleLoadConfig = async () => {
+        if (!appId) return;
+        try {
+            const config = await getGameConfig({ app_id: appId });
+            setInterfacePath(config.interface_path || '');
+            setStatusPath(config.status_path || '');
+            setMessage(config.interface_path ? 'Config loaded.' : 'No saved config for this AppID.');
+        } catch (e) { setMessage('Error loading config.'); }
     };
 
     const handleSave = async () => {
-        await saveGameConfig({ app_id: selectedAppId, interface_path: interfacePath, status_path: statusPath });
-        alert('Saved!');
+        if (!appId || !interfacePath || !statusPath) {
+            setMessage('Please fill all fields.');
+            return;
+        }
+        try {
+            await saveGameConfig({ app_id: appId, interface_path: interfacePath, status_path: statusPath });
+            setMessage('Saved successfully!');
+        } catch (e) { setMessage('Error saving.'); }
     };
 
     return React.createElement('div', { style: { padding: '20px', color: 'white' } },
-        React.createElement('h3', null, 'GSE Achievements Tracker'),
-        React.createElement('select', { 
-            value: selectedAppId, 
-            onChange: (e: any) => handleGameChange(e.target.value), 
-            style: { width: '100%', padding: '8px', background: '#222', color: 'white', border: '1px solid #444' } 
-        },
-            React.createElement('option', { value: "" }, "Select a game"),
-            games.map(g => React.createElement('option', { key: g.appid, value: g.appid }, g.display_name))
-        ),
-        selectedAppId && React.createElement('div', { style: { marginTop: '15px' } },
-            React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', null, 'Interface Path:'),
+        React.createElement('h2', null, 'GSE Achievements Tracker'),
+        React.createElement('p', { style: { color: '#aaa', fontSize: '0.9em' } }, 'Enter the Steam AppID of the game you want to configure.'),
+        
+        React.createElement('div', { style: { marginTop: '20px' } },
+            React.createElement('label', null, 'Steam AppID:'),
+            React.createElement('div', { style: { display: 'flex', gap: '10px', marginTop: '5px' } },
                 React.createElement('input', { 
-                    type: "text", placeholder: "E:\\Games\\MyGame\\steam_settings\\achievements.json", 
+                    type: "text", placeholder: "e.g. 123456", 
+                    value: appId, 
+                    onChange: (e: any) => setAppId(e.target.value), 
+                    style: { flexGrow: 1, padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
+                }),
+                React.createElement('button', { 
+                    onClick: handleLoadConfig,
+                    style: { padding: '8px 15px', background: '#444', color: 'white', border: 'none', cursor: 'pointer' }
+                }, 'Load')
+            )
+        ),
+
+        appId && React.createElement('div', { style: { marginTop: '20px' } },
+            React.createElement('div', { style: { marginBottom: '15px' } },
+                React.createElement('label', null, 'Achievements Interface (steam_settings/achievements.json):'),
+                React.createElement('input', { 
+                    type: "text", placeholder: "C:\\Games\\MyGame\\steam_settings\\achievements.json", 
                     value: interfacePath, 
                     onChange: (e: any) => setInterfacePath(e.target.value), 
-                    style: { width: '100%', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
+                    style: { width: '100%', padding: '8px', marginTop: '5px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
                 })
             ),
             React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', null, 'Status Path:'),
+                React.createElement('label', null, 'Achievements Status (AppData/.../achievements.json):'),
                 React.createElement('input', { 
                     type: "text", placeholder: "C:\\Users\\...\\Goldberg SteamEmu Saves\\123\\achievements.json", 
                     value: statusPath, 
                     onChange: (e: any) => setStatusPath(e.target.value), 
-                    style: { width: '100%', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
+                    style: { width: '100%', padding: '8px', marginTop: '5px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
                 })
             ),
             React.createElement('button', { 
                 onClick: handleSave, 
-                style: { padding: '10px 20px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' } 
+                style: { padding: '10px 25px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' } 
             }, "Save Configuration")
-        )
+        ),
+        message && React.createElement('div', { style: { marginTop: '15px', color: message.includes('Saved') ? '#4caf50' : '#ff9800' } }, message)
     );
 };
 
 export default definePlugin(() => {
+    console.log("GSE Achievements: Plugin initialized.");
+
+    // Notification listener
     (window as any).Millennium?.on?.('achievement_earned', (data: any) => {
-        (window as any).SteamClient?.Notifications?.DisplayNotification("Achievement Unlocked!", data.name + "\n" + data.description, data.icon || "", "");
+        try {
+            (window as any).SteamClient?.Notifications?.DisplayNotification("Achievement Unlocked!", data.name + "\n" + data.description, data.icon || "", "");
+        } catch (e) {}
     });
+
+    // Try to add a tab to Library details page if the API is available
+    try {
+        if ((Millennium as any).AddTab) {
+            (Millennium as any).AddTab({
+                name: "Achievements (GSE)",
+                id: "gse-achievements-tab",
+                view: "LibraryAppDetails",
+                content: (props: any) => React.createElement(AchievementsTab, { appId: (Millennium as any).getAppId?.() })
+            });
+        }
+    } catch (e) {
+        console.warn("GSE Achievements: Could not register Library tab. Fallback to Settings UI.");
+    }
 
     return {
         title: "GSE Achievements",
