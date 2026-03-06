@@ -1,32 +1,29 @@
-import { Millennium, definePlugin, callable, IconsModule } from '@steambrew/client';
+import { Millennium, definePlugin, callable, IconsModule, Field, DialogButton, TextField } from '@steambrew/client';
 import React from 'react';
 
 const getGameConfig = callable<[{ app_id: string }], any>('get_game_config');
-const getAchievements = callable<[{ app_id: string }], any[]>('get_achievements');
-const saveGameConfig = callable<[{ app_id: string; interface_path: string; status_path: string }], { success: boolean }>('save_game_config');
+const getAchievements = callable<[{ app_id: string }], any>('get_achievements');
+const saveGameConfig = callable<[{ app_id: string; interface_path: string; status_path: string }], any>('save_game_config');
 
 const PluginSettings = () => {
     const [appId, setAppId] = React.useState('');
     const [interfacePath, setInterfacePath] = React.useState('');
     const [statusPath, setStatusPath] = React.useState('');
     const [achievements, setAchievements] = React.useState<any[]>([]);
-    const [message, setMessage] = React.useState('');
     const [isSaving, setIsSaving] = React.useState(false);
 
-    // Normalize path for Lua (Windows usually uses \, Lua/framework prefers /)
     const normalizePath = (path: string) => {
         return path.replace(/\\/g, '/').replace(/"/g, '').trim();
     };
 
     const handleBrowse = async (setter: (val: string) => void) => {
         try {
-            // Attempt to use Steam's internal file picker if available
             const client = (window as any).SteamClient;
             if (client?.Window?.OpenFilePicker) {
                 const path = await client.Window.OpenFilePicker("Select achievements.json", "", false);
                 if (path) setter(normalizePath(path));
             } else {
-                alert("File picker not supported in this Steam version. Please paste the path manually.");
+                alert("File picker not supported. Please paste the path manually.");
             }
         } catch (e) {
             console.error("GSE: Browse failed", e);
@@ -48,10 +45,8 @@ const PluginSettings = () => {
         setStatusPath(config.status_path || '');
         if (config.interface_path) {
             refreshPreview(id);
-            setMessage('Config loaded.');
         } else {
             setAchievements([]);
-            setMessage('New configuration.');
         }
     };
 
@@ -72,7 +67,6 @@ const PluginSettings = () => {
 
             if (res && res.success) {
                 alert('✅ Saved successfully!');
-                setMessage('✅ Saved!');
                 refreshPreview(id);
             } else {
                 alert('❌ Backend failed to save.');
@@ -84,61 +78,141 @@ const PluginSettings = () => {
         }
     };
 
-    return React.createElement('div', { style: { padding: '20px', color: 'white' } },
-        React.createElement('h3', null, 'GSE Achievements Tracker'),
-        
-        React.createElement('div', { style: { marginBottom: '20px' } },
-            React.createElement('label', null, '1. Steam AppID:'),
-            React.createElement('div', { style: { display: 'flex', gap: '10px', marginTop: '5px' } },
-                React.createElement('input', { 
-                    placeholder: "AppID", value: appId, onChange: (e:any)=>setAppId(e.target.value),
-                    style: { flexGrow: 1, background: '#111', color: 'white', padding: '8px', border: '1px solid #333' }
-                }),
-                React.createElement('button', { onClick: handleLoad, style: { padding: '8px 15px' } }, 'Load')
-            )
-        ),
+    return (
+        <div style={{ padding: '20px', color: 'white' }}>
+            <h3>GSE Achievements Tracker</h3>
+            
+            <div style={{ marginBottom: '20px' }}>
+                <Field label="1. Steam AppID" description="Enter the Steam AppID of the game" icon={<IconsModule.Search />}>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                        <TextField 
+                            value={appId} 
+                            onChange={(e:any)=>setAppId(e.target.value)}
+                        />
+                        <DialogButton onClick={handleLoad}>Load</DialogButton>
+                    </div>
+                </Field>
+            </div>
 
-        appId && React.createElement('div', null,
-            React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', null, '2. Achievements Interface Path:'),
-                React.createElement('div', { style: { display: 'flex', gap: '5px', marginTop: '5px' } },
-                    React.createElement('input', { 
-                        placeholder: ".../steam_settings/achievements.json", 
-                        value: interfacePath, 
-                        onChange: (e:any)=>setInterfacePath(e.target.value),
-                        style: { flexGrow: 1, background: '#111', color: 'white', padding: '8px', border: '1px solid #333' }
-                    }),
-                    React.createElement('button', { onClick: () => handleBrowse(setInterfacePath), style: { padding: '8px' } }, '📁')
-                )
-            ),
-            React.createElement('div', { style: { marginBottom: '15px' } },
-                React.createElement('label', null, '3. Achievements Status Path:'),
-                React.createElement('div', { style: { display: 'flex', gap: '5px', marginTop: '5px' } },
-                    React.createElement('input', { 
-                        placeholder: ".../GSE Saves/{ID}/achievements.json", 
-                        value: statusPath, 
-                        onChange: (e:any)=>setStatusPath(e.target.value),
-                        style: { flexGrow: 1, background: '#111', color: 'white', padding: '8px', border: '1px solid #333' }
-                    }),
-                    React.createElement('button', { onClick: () => handleBrowse(setStatusPath), style: { padding: '8px' } }, '📁')
-                )
-            ),
-            React.createElement('button', { 
-                onClick: handleSave, 
-                disabled: isSaving,
-                style: { width: '100%', background: '#2196f3', color: 'white', padding: '12px', border: 'none', fontWeight: 'bold' } 
-            }, isSaving ? 'Saving...' : 'Save Configuration')
-        ),
+            {appId && (
+                <div>
+                    <Field label="2. Achievements Interface Path" description="Path to achievements.json (metadata)" icon={<IconsModule.Settings />}>
+                        <div style={{ display: 'flex', gap: '5px' }}>
+                            <TextField 
+                                value={interfacePath} 
+                                onChange={(e:any)=>setInterfacePath(e.target.value)}
+                            />
+                            <DialogButton onClick={() => handleBrowse(setInterfacePath)}>📁</DialogButton>
+                        </div>
+                    </Field>
 
-        achievements.length > 0 && React.createElement('div', { style: { marginTop: '20px' } },
-            React.createElement('h4', null, 'Found ' + achievements.length + ' achievements'),
-            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '5px' } },
-                achievements.map(a => React.createElement('div', { key: a.name, style: { fontSize: '0.8em', color: a.unlocked ? '#4caf50' : '#666' } }, 
-                    (a.unlocked ? '✅ ' : '🔒 ') + (a.display_name || a.name)
-                ))
-            )
-        )
+                    <Field label="3. Achievements Status Path" description="Path to achievements.json (unlock status)" icon={<IconsModule.Settings />}>
+                        <div style={{ display: 'flex', gap: '5px' }}>
+                            <TextField 
+                                value={statusPath} 
+                                onChange={(e:any)=>setStatusPath(e.target.value)}
+                            />
+                            <DialogButton onClick={() => handleBrowse(setStatusPath)}>📁</DialogButton>
+                        </div>
+                    </Field>
+
+                    <DialogButton 
+                        onClick={handleSave} 
+                        disabled={isSaving}
+                        style={{ width: '100%', marginTop: '10px' }} 
+                    >
+                        {isSaving ? 'Saving...' : 'Save Configuration'}
+                    </DialogButton>
+                </div>
+            )}
+
+            {achievements.length > 0 && (
+                <div style={{ marginTop: '20px' }}>
+                    <h4>Found {achievements.length} achievements</h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '5px' }}>
+                        {achievements.map(a => (
+                            <div key={a.name} style={{ fontSize: '0.8em', color: a.unlocked ? '#4caf50' : '#666' }}>
+                                {a.unlocked ? '✅ ' : '🔒 '} {a.display_name || a.name}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
     );
+};
+
+const GameDetailsAchievements = ({ appId }: { appId: string }) => {
+    const [achievements, setAchievements] = React.useState<any[]>([]);
+
+    React.useEffect(() => {
+        const load = async () => {
+            const data = await getAchievements({ app_id: appId });
+            setAchievements(data || []);
+        };
+        load();
+        const interval = setInterval(load, 10000);
+        return () => clearInterval(interval);
+    }, [appId]);
+
+    if (achievements.length === 0) return null;
+
+    const unlockedCount = achievements.filter(a => a.unlocked).length;
+
+    return (
+        <div style={{ 
+            background: 'rgba(0,0,0,0.4)', 
+            padding: '15px', 
+            borderRadius: '4px', 
+            marginTop: '10px',
+            border: '1px solid rgba(255,255,255,0.1)'
+        }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span style={{ color: '#eee', fontWeight: 'bold' }}>GSE Achievements</span>
+                <span style={{ color: '#aaa' }}>{unlockedCount} / {achievements.length}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px' }}>
+                {achievements.map(a => (
+                    <div 
+                        key={a.name} 
+                        title={a.display_name || a.name}
+                        style={{ 
+                            width: '40px', height: '40px', background: '#222', borderRadius: '4px',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            border: a.unlocked ? '2px solid #4caf50' : '2px solid #444',
+                            opacity: a.unlocked ? 1 : 0.4, flexShrink: 0, fontSize: '10px',
+                            textAlign: 'center', overflow: 'hidden'
+                        }}
+                    >
+                        {(a.display_name || a.name).substring(0, 3)}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const injectAchievements = () => {
+    const container = document.querySelector('.library_AppDetailsMain_1YI_S');
+    if (container && !container.querySelector('.gse-achievements-injected')) {
+        const appIdMatch = window.location.href.match(/\/app\/(\d+)/);
+        const appId = appIdMatch ? appIdMatch[1] : null;
+        
+        if (appId) {
+            const injectDiv = document.createElement('div');
+            injectDiv.className = 'gse-achievements-injected';
+            const target = container.querySelector('.library_AppDetailsHeader_3oY8m');
+            if (target) {
+                target.parentNode?.insertBefore(injectDiv, target.nextSibling);
+                const ReactDOM = (window as any).ReactDOM;
+                if (ReactDOM?.createRoot) {
+                    ReactDOM.createRoot(injectDiv).render(<GameDetailsAchievements appId={appId} />);
+                } else if (ReactDOM?.render) {
+                    ReactDOM.render(<GameDetailsAchievements appId={appId} />, injectDiv);
+                }
+            }
+        }
+    }
 };
 
 export default definePlugin(() => {
@@ -148,9 +222,24 @@ export default definePlugin(() => {
         } catch (e) {}
     });
 
+    (Millennium as any).AddWindowCreateHook?.((context: any) => {
+        if (context.m_strTitle === 'Steam' || !context.m_strTitle) {
+            const observer = new MutationObserver(() => {
+                if (window.location.href.includes('/library/app/')) {
+                    injectAchievements();
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+    });
+
+    if (window.location.href.includes('/library/app/')) {
+        setTimeout(injectAchievements, 1000);
+    }
+
     return {
         title: "GSE Achievements",
-        icon: React.createElement(IconsModule.Settings, null),
-        content: React.createElement(PluginSettings, null),
+        icon: <IconsModule.Settings />,
+        content: <PluginSettings />,
     };
 });
