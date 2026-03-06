@@ -11,7 +11,7 @@ if (fs.existsSync(OUT_DIR)) {
 }
 
 // Ensure directories exist
-fs.mkdirSync(path.join(OUT_DIR, 'dist'), { recursive: true });
+fs.mkdirSync(path.join(OUT_DIR, '.millennium', 'Dist'), { recursive: true });
 fs.mkdirSync(path.join(OUT_DIR, 'backend'), { recursive: true });
 
 console.log('Building frontend...');
@@ -30,10 +30,10 @@ fs.copyFileSync(
     path.join(OUT_DIR, 'plugin.json')
 );
 
-// Copy frontend dist
+// Copy frontend dist (from .millennium/Dist/index.js to the out folder's .millennium/Dist/index.js)
 fs.copyFileSync(
-    path.join(__dirname, '..', 'dist', 'index.js'),
-    path.join(OUT_DIR, 'dist', 'index.js')
+    path.join(__dirname, '..', '.millennium', 'Dist', 'index.js'),
+    path.join(OUT_DIR, '.millennium', 'Dist', 'index.js')
 );
 
 // Copy backend
