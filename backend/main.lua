@@ -12,11 +12,17 @@ end
 local fs = get_module({"fs", "filesystem"})
 local json = get_module({"json", "cjson"})
 
-local settings_path = "settings.json"
+-- Determine absolute settings path if possible
+local plugin_path = "."
+if millennium.get_plugin_path then
+    plugin_path = millennium.get_plugin_path()
+end
+local settings_path = plugin_path .. "/settings.json"
+
 local configs = {}
 local last_status_map = {}
 
--- Fallback file helpers using standard Lua io if fs is missing
+-- Fallback file helpers
 local function file_exists(path)
     if fs and fs.exists then return fs.exists(path) end
     local f = io.open(path, "rb")
@@ -34,9 +40,20 @@ local function read_file(path)
 end
 
 local function write_file(path, content)
-    if fs and fs.write_file then return fs.write_file(path, content) end
+    -- Normalize path separators for Windows
+    path = path:gsub("\\", "/")
+    
+    if fs and fs.write_file then 
+        local success = fs.write_file(path, content)
+        if success then return true end
+        print("GSE Achievements WARN: fs.write_file failed for " .. path .. ", trying io.open")
+    end
+    
     local f = io.open(path, "wb")
-    if not f then return false end
+    if not f then 
+        print("GSE Achievements ERROR: Could not open file for writing: " .. path)
+        return false 
+    end
     f:write(content)
     f:close()
     return true
@@ -109,6 +126,8 @@ end
 local function save_game_config(payload)
     local app_id = tostring(payload.app_id)
     configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
+    
+    print("GSE Achievements: Attempting to save to " .. settings_path)
     local success = write_file(settings_path, encode_json(configs))
     
     local status = decode_json(read_file(payload.status_path))
@@ -138,11 +157,8 @@ end
 -- Lifecycle
 local function on_load()
     print("GSE Achievements: Backend starting...")
+    print("GSE Achievements: Settings path resolve to: " .. settings_path)
     
-    -- Diagnostic
-    if not fs then print("GSE Achievements WARN: fs/filesystem module NOT FOUND") end
-    if not json then print("GSE Achievements WARN: json/cjson module NOT FOUND") end
-
     local content = read_file(settings_path)
     if content then
         local data = decode_json(content)
