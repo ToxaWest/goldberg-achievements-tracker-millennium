@@ -64,13 +64,35 @@ const PluginSettings = () => {
     const [statusPath, setStatusPath] = React.useState('');
 
     React.useEffect(() => {
-        const load = async () => {
-            if ((window as any).SteamClient?.Apps?.GetList) {
-                const list = await (window as any).SteamClient.Apps.GetList();
-                setGames(list.filter((a: any) => a.is_installed).sort((a: any, b: any) => a.display_name.localeCompare(b.display_name)));
+        const fetchGamesList = async () => {
+            try {
+                let list: any[] = [];
+                const client = (window as any).SteamClient;
+                
+                if (client?.Apps?.GetList) {
+                    list = await client.Apps.GetList();
+                } else if (client?.Apps?.GetAllApps) {
+                    list = await client.Apps.GetAllApps();
+                }
+
+                if (list && Array.isArray(list)) {
+                    const installed = list
+                        .filter((a: any) => a.is_installed || a.bIsInstalled)
+                        .map((a: any) => ({
+                            appid: a.appid || a.unAppID,
+                            display_name: a.display_name || a.strName
+                        }))
+                        .sort((a, b) => a.display_name.localeCompare(b.display_name));
+                    
+                    setGames(installed);
+                } else {
+                    console.error("GSE Achievements: Could not retrieve app list from SteamClient.");
+                }
+            } catch (e) {
+                console.error("GSE Achievements: Error fetching games list", e);
             }
-        }
-        load();
+        };
+        fetchGamesList();
     }, []);
 
     const handleGameChange = async (appId: string) => {
@@ -97,40 +119,39 @@ const PluginSettings = () => {
         React.createElement('select', { 
             value: selectedAppId, 
             onChange: (e: any) => handleGameChange(e.target.value), 
-            style: { width: '100%', padding: '8px', background: '#222', color: 'white' } 
+            style: { width: '100%', padding: '8px', background: '#222', color: 'white', border: '1px solid #444' } 
         },
             React.createElement('option', { value: "" }, "Select a game"),
             games.map(g => React.createElement('option', { key: g.appid, value: g.appid }, g.display_name))
         ),
         selectedAppId && React.createElement('div', { style: { marginTop: '15px' } },
-            React.createElement('input', { 
-                type: "text", placeholder: "Interface Path (achievements.json)", 
-                value: interfacePath, 
-                onChange: (e: any) => setInterfacePath(e.target.value), 
-                style: { width: '100%', marginBottom: '10px', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
-            }),
-            React.createElement('input', { 
-                type: "text", placeholder: "Status Path (achievements.json)", 
-                value: statusPath, 
-                onChange: (e: any) => setStatusPath(e.target.value), 
-                style: { width: '100%', marginBottom: '10px', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
-            }),
+            React.createElement('div', { style: { marginBottom: '15px' } },
+                React.createElement('label', null, 'Interface Path:'),
+                React.createElement('input', { 
+                    type: "text", placeholder: "E:\\Games\\MyGame\\steam_settings\\achievements.json", 
+                    value: interfacePath, 
+                    onChange: (e: any) => setInterfacePath(e.target.value), 
+                    style: { width: '100%', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
+                })
+            ),
+            React.createElement('div', { style: { marginBottom: '15px' } },
+                React.createElement('label', null, 'Status Path:'),
+                React.createElement('input', { 
+                    type: "text", placeholder: "C:\\Users\\...\\Goldberg SteamEmu Saves\\123\\achievements.json", 
+                    value: statusPath, 
+                    onChange: (e: any) => setStatusPath(e.target.value), 
+                    style: { width: '100%', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #333' } 
+                })
+            ),
             React.createElement('button', { 
                 onClick: handleSave, 
                 style: { padding: '10px 20px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' } 
-            }, "Save")
+            }, "Save Configuration")
         )
     );
 };
 
 export default definePlugin(() => {
-    // AddTab Hook - We inject into LibraryAppDetails if possible
-    Millennium.AddWindowCreateHook?.((context: any) => {
-        if (context.m_strName === 'SP Desktop') {
-            // Future logic to inject tab
-        }
-    });
-
     (window as any).Millennium?.on?.('achievement_earned', (data: any) => {
         (window as any).SteamClient?.Notifications?.DisplayNotification("Achievement Unlocked!", data.name + "\n" + data.description, data.icon || "", "");
     });
