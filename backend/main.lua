@@ -69,11 +69,13 @@ end
 
 -- Exposed Methods
 local function get_game_config(payload)
+    print("GSE: get_game_config for " .. tostring(payload.app_id))
     return configs[tostring(payload.app_id)] or {}
 end
 
 local function save_game_config(payload)
     local app_id = tostring(payload.app_id)
+    print("GSE: save_game_config for " .. app_id)
     configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
     local success = safe_write_file(settings_path, json.encode(configs))
     
@@ -84,6 +86,7 @@ end
 
 local function get_achievements(payload)
     local app_id = tostring(payload.app_id)
+    print("GSE: get_achievements for " .. app_id)
     local config = configs[app_id]
     if not config then return {} end
     
