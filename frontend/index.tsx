@@ -203,35 +203,33 @@ const showGSEConfig = (appId: string, doc: Document) => {
 };
 
 /**
- * Robust AppID detection with separate scenarios for Desktop and BPM
+ * Robust AppID detection
  */
 const getAppId = (doc: Document, isDesktop: boolean) => {
-    if (isDesktop) {
-        // Desktop Scenario: Images on the current document are the most reliable
-        const hero = doc.querySelector('img[src*="library_hero"], img[class*="LibraryHero"]');
-        const heroId = (hero as any)?.src?.match(/\/assets\/(\d+)/)?.[1];
-        if (heroId) return heroId;
+    // 1. Try URL Match (highly reliable for popups and game pages)
+    const urlMatch = doc.location.href.match(/\/app\/(\d+)/) || doc.location.pathname.match(/\/app\/(\d+)/);
+    if (urlMatch) return urlMatch[1];
 
-        // Search all images for assets pattern
-        const imgs = Array.from(doc.querySelectorAll('img'));
-        for (const img of imgs) {
-            const match = (img.src || img.getAttribute('src') || "").match(/\/assets\/(\d+)/);
-            if (match) return match[1];
-        }
-        
-        // Last resort: Manager (usually sticky, but better than nothing)
+    // 2. Try Hero Images / Assets (very reliable for rendered content)
+    const hero = doc.querySelector('img[src*="/assets/"], img[src*="library_hero"], img[class*="LibraryHero"]');
+    const heroId = (hero as any)?.src?.match(/\/assets\/(\d+)/)?.[1];
+    if (heroId) return heroId;
+
+    // 3. Fallback search all images
+    const imgs = Array.from(doc.querySelectorAll('img'));
+    for (const img of imgs) {
+        const match = (img.src || img.getAttribute('src') || "").match(/\/assets\/(\d+)/);
+        if (match) return match[1];
+    }
+
+    // 4. Desktop Manager fallback
+    if (isDesktop) {
         const win = (doc.defaultView || window) as any;
         const manager = win.MainWindowBrowserManager || (window.top as any)?.MainWindowBrowserManager;
         return manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    } else {
-        // BPM Scenario: URL is usually very reliable in popups
-        const urlMatch = doc.location.href.match(/\/app\/(\d+)/) || doc.location.pathname.match(/\/app\/(\d+)/);
-        if (urlMatch) return urlMatch[1];
-
-        // Hero Image
-        const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"]');
-        return (hero as any)?.src?.match(/\/assets\/(\d+)/)?.[1] || null;
     }
+
+    return null;
 };
 
 // ============================================================================
@@ -251,7 +249,7 @@ const processInjection = async (doc: Document) => {
         return;
     }
 
-    // BPM Tab Check: Only inject on "What's New"
+    // BPM Tab Check
     if (isBPM) {
         const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
                          doc.getElementById('«rod»WhatsNew_Content') ||
