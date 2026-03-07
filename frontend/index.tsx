@@ -3,8 +3,6 @@ import React from 'react';
 
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
-let lastAppId: string | null = null;
-
 /**
  * Robust global discovery
  */
@@ -25,6 +23,25 @@ const getGlobal = (name: string): any => {
     return null;
 };
 
+/**
+ * Scans an object for a specific method (up to 2 levels deep)
+ */
+const findMethod = (obj: any, methodName: string): any => {
+    if (!obj) return null;
+    if (typeof obj[methodName] === 'function') return obj[methodName].bind(obj);
+    
+    // Check one level deeper (e.g. SteamClient.Window.OpenFilePicker)
+    for (const key of Object.keys(obj)) {
+        try {
+            const sub = obj[key];
+            if (sub && typeof sub[methodName] === 'function') {
+                return sub[methodName].bind(sub);
+            }
+        } catch (e) {}
+    }
+    return null;
+};
+
 const callBackend = async (method: string, args: any) => {
     const m = getGlobal('Millennium');
     if (!m?.callServerMethod) {
@@ -32,18 +49,9 @@ const callBackend = async (method: string, args: any) => {
         return null;
     }
     try {
-        log(`Calling ${method}...`);
         const res = await m.callServerMethod("goldberg-achievements", method, args);
-        log(`Raw response from ${method}:`, res);
-        
-        // Match HLTB style: Parse JSON from Lua
         if (typeof res === 'string') {
-            try {
-                return JSON.parse(res);
-            } catch (e) {
-                log(`Failed to parse response from ${method}:`, e);
-                return res;
-            }
+            try { return JSON.parse(res); } catch (e) { return res; }
         }
         return res;
     } catch (e) {
@@ -54,10 +62,12 @@ const callBackend = async (method: string, args: any) => {
 
 const notify = (title: string, message: string) => {
     const sc = getGlobal('SteamClient');
-    if (sc?.Notifications?.DisplayNotification) {
-        sc.Notifications.DisplayNotification(title, message, "", "");
+    const displayFn = findMethod(sc, 'DisplayNotification') || findMethod(sc?.Notifications, 'DisplayNotification');
+    
+    if (displayFn) {
+        displayFn(title, message, "", "");
     } else {
-        log("NOTIFY:", title, message);
+        log("NOTIFICATION:", title, message);
     }
 };
 
@@ -76,7 +86,12 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
                     setStatusPath(config.status_path || '');
                 }
                 const data = await callBackend('get_achievements', { app_id: appId });
-                setAchievements(Array.isArray(data) ? data : []);
+                // Handle Lua {} becoming JS {} instead of []
+                if (data && typeof data === 'object' && !Array.isArray(data)) {
+                    setAchievements(Object.values(data));
+                } else {
+                    setAchievements(Array.isArray(data) ? data : []);
+                }
             } catch (e) {
                 log("Load error:", e);
             } finally {
@@ -88,14 +103,11 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     const handleBrowse = async (setter: (val: string) => void) => {
         const sc = getGlobal('SteamClient');
-        // Check multiple possible locations for OpenFilePicker
-        const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || (window as any).SteamClient?.Window?.OpenFilePicker;
+        const picker = findMethod(sc, 'OpenFilePicker');
         
         if (!picker) {
-            log("OpenFilePicker not found. Checking all globals...");
-            const allSc = getGlobal('SteamClient');
-            log("SteamClient available keys:", Object.keys(allSc || {}));
-            notify("GSE Error", "File picker not found in this window.");
+            log("OpenFilePicker not found anywhere in SteamClient.");
+            notify("GSE Error", "File picker not found. Please paste path manually.");
             return;
         }
 
@@ -123,9 +135,12 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
         if (res && res.success) {
             notify("GSE Achievements", "Settings saved successfully!");
             const data = await callBackend('get_achievements', { app_id: appId });
-            setAchievements(Array.isArray(data) ? data : []);
+            if (data && typeof data === 'object' && !Array.isArray(data)) {
+                setAchievements(Object.values(data));
+            } else {
+                setAchievements(Array.isArray(data) ? data : []);
+            }
         } else {
-            log("Save Failed. Response:", res);
             notify("GSE Error", "Backend failed to save settings.");
         }
     };
@@ -137,7 +152,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
             
             <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH (Metadata)</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={interfacePath} onChange={e => setInterfacePath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setInterfacePath)}>📁</button>
@@ -145,7 +160,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH (Unlocks)</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={statusPath} onChange={e => setStatusPath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setStatusPath)}>📁</button>
@@ -175,7 +190,7 @@ const showGSEConfig = (appId: string, doc: Document) => {
     const rd = getGlobal('SP_REACTDOM');
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
-        else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
+        else if ((modalRoot as any)._root) (modalRoot as any)._root.unmount();
         modalRoot.remove();
     };
     const element = (
@@ -188,13 +203,20 @@ const showGSEConfig = (appId: string, doc: Document) => {
             </div>
         </div>
     );
-    if (rd?.createRoot) {
-        if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
-        (modalRoot as any)._gseRoot.render(element);
-    } else if (rd?.render) {
-        rd.render(element, modalRoot);
+    
+    try {
+        if (rd?.createRoot) {
+            if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
+            (modalRoot as any)._gseRoot.render(element);
+        } else if (rd?.render) {
+            rd.render(element, modalRoot);
+        }
+    } catch (e) {
+        log("Modal Render Error:", e);
     }
 };
+
+let lastAppId: string | null = null;
 
 const processInjection = async (doc: Document) => {
     const manager = getGlobal('MainWindowBrowserManager');
@@ -208,7 +230,6 @@ const processInjection = async (doc: Document) => {
         if (match) appId = match[1];
     }
     if (!appId) {
-        // HLTB style: Search images
         const images = doc.querySelectorAll('img[src*="/assets/"]');
         for (const img of Array.from(images) as HTMLImageElement[]) {
             const match = img.src.match(/\/assets\/(\d+)/);
@@ -251,6 +272,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
+        content: <div style={{padding: '20px'}}>GSE Active.</div>,
     };
 });
