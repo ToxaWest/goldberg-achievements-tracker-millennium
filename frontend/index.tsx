@@ -189,18 +189,20 @@ const showGSEConfig = (appId: string, doc: Document) => {
 };
 
 const getAppId = (doc: Document) => {
-    // 1. Try URL of this specific document first (most specific to the view)
-    let id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
-    if (id) return id;
-
-    // 2. Try images in THIS document - very reliable for current game page (HLTB style)
+    const win = (doc.defaultView || window) as any;
+    
+    // 1. Try images in THIS document first (very reliable for current game page)
     const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"], img[src*="library_hero"], img[src*="/assets/"]') as HTMLImageElement;
     const match = (hero?.src || hero?.getAttribute('src'))?.match(/\/assets\/(\d+)/);
     if (match) return match[1];
 
-    // 3. Check local window's MainWindowBrowserManager
-    const win = (doc.defaultView || window) as any;
-    id = win.MainWindowBrowserManager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    // 2. Try URL of this specific document
+    let id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
+    if (id) return id;
+
+    // 3. Check MainWindowBrowserManager (fall back to global/parent if local fails)
+    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager || (window as any).MainWindowBrowserManager;
+    id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     
     return id || null;
 };
@@ -210,18 +212,21 @@ const getAppId = (doc: Document) => {
 const injectedIds = new WeakMap<Document, string>();
 
 const processInjection = async (doc: Document) => {
-    const isDesktop = doc.documentElement.classList.contains("DesktopUI") || doc.body.classList.contains("DesktopUI");
+    const isDesktop = doc.documentElement.classList.contains("DesktopUI") || 
+                      doc.body.classList.contains("DesktopUI") ||
+                      window.document.body.classList.contains("DesktopUI");
     const isBPM = !isDesktop;
 
     const appId = getAppId(doc);
     
+    // If no AppID found, cleanup and exit
     if (!appId) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) { existing.remove(); injectedIds.delete(doc); }
         return;
     }
 
-    // BPM Tab Check
+    // BPM-only tab validation
     if (isBPM) {
         const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
                          doc.getElementById('«rod»WhatsNew_Content') ||
@@ -234,9 +239,9 @@ const processInjection = async (doc: Document) => {
         }
     }
 
-    // Handle game switch per document
+    // Game changed or first injection for this document
     if (appId !== injectedIds.get(doc)) {
-        log(`Injection event: ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
+        log(`Injecting for ${appId} (Mode: ${isBPM ? 'BPM' : 'Desktop'})`);
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) existing.remove();
         injectedIds.set(doc, appId);
@@ -268,7 +273,7 @@ const processInjection = async (doc: Document) => {
 export default definePlugin(() => {
     const observe = (doc: Document) => {
         const observer = new MutationObserver(() => processInjection(doc));
-        observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true });
+        observer.observe(doc.documentElement || doc.body, { childList: true, subtree: true });
         processInjection(doc);
     };
 
