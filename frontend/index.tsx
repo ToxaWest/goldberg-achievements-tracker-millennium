@@ -1,42 +1,21 @@
-import { Millennium, definePlugin, IconsModule } from '@steambrew/client';
+import { Millennium, definePlugin, IconsModule, callable } from '@steambrew/client';
 import React from 'react';
 
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
-/**
- * Enhanced global discovery
- */
-const getGlobal = (name: string): any => {
-    const win = window as any;
-    const sources = [win, win.opener, win.top, win.parent];
-    for (const s of sources) {
-        if (s && s[name]) return s[name];
-    }
-    const manager = win.MainWindowBrowserManager || (window as any).opener?.MainWindowBrowserManager;
-    if (manager) {
-        if (manager[name]) return manager[name];
-        if (manager.m_browser && manager.m_browser[name]) return manager.m_browser[name];
-    }
-    return null;
-};
+// Direct callable helpers for maximum reliability
+const getGameConfig = callable<any, any>('get_game_config');
+const getAchievements = callable<any, any>('get_achievements');
+const saveGameConfig = callable<any, any>('save_game_config');
 
-const callBackend = async (method: string, args: any) => {
-    const m = getGlobal('Millennium');
-    if (!m?.callServerMethod) return null;
-    try {
-        log(`CALLING BACKEND: ${method}`, args);
-        // Force stringify to ensure arguments are not dropped by IPC
-        const res = await m.callServerMethod("goldberg-achievements", method, JSON.stringify(args));
-        log(`BACKEND RESPONSE (${method}):`, res);
-        
-        if (typeof res === 'string' && (res.startsWith('{') || res.startsWith('['))) {
-            try { return JSON.parse(res); } catch (e) { return res; }
-        }
-        return res;
-    } catch (e) {
-        log(`BACKEND EXCEPTION (${method}):`, e);
-        return null;
+/**
+ * Robust JSON parser for backend responses
+ */
+const parseResult = (res: any) => {
+    if (typeof res === 'string') {
+        try { return JSON.parse(res); } catch (e) { return res; }
     }
+    return res;
 };
 
 const AchievementItem = ({ a }: { a: any }) => {
@@ -63,12 +42,12 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     const [isLoading, setIsLoading] = React.useState(true);
 
     const loadData = async () => {
-        const config = await callBackend('get_game_config', { app_id: appId });
+        const config = parseResult(await getGameConfig({ app_id: appId }));
         if (config) {
             setInterfacePath(config.interface_path || '');
             setStatusPath(config.status_path || '');
         }
-        const data = await callBackend('get_achievements', { app_id: appId });
+        const data = parseResult(await getAchievements({ app_id: appId }));
         setAchievements(Array.isArray(data) ? data : []);
         setIsLoading(false);
     };
@@ -76,50 +55,27 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     React.useEffect(() => { loadData(); }, [appId]);
 
     const handleBrowse = async (setter: (val: string) => void) => {
-        const sc = getGlobal('SteamClient');
-        if (!sc) return alert("SteamClient not found.");
-
-        // Safe search for the picker method
-        const findMethod = (obj: any): any => {
-            if (!obj) return null;
-            if (typeof obj.OpenFilePicker === 'function') return obj.OpenFilePicker.bind(obj);
-            // Check known sub-modules
-            for (const key of ['Browser', 'Window', 'System', 'UI']) {
-                try {
-                    const sub = obj[key];
-                    if (sub && typeof sub.OpenFilePicker === 'function') return sub.OpenFilePicker.bind(sub);
-                } catch(e) {}
-            }
-            return null;
-        };
-
-        const picker = findMethod(sc) || findMethod((window as any).opener?.SteamClient);
+        // Direct access to SteamClient
+        const sc = (window as any).SteamClient || (window as any).opener?.SteamClient;
+        const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || sc?.OpenFilePicker;
         
-        if (!picker) {
-            log("Picker not found.");
-            alert("File picker not found. Please paste the path.");
+        if (typeof picker !== 'function') {
+            alert("File picker not found. Please paste the path manually.");
             return;
         }
 
         try {
-            log("Opening Native Picker...");
             const path = await picker("Select achievements.json", "", false);
             if (path) setter(path.replace(/\\/g, '/').replace(/"/g, '').trim());
         } catch (e) {
-            log("Picker Error:", e);
+            log("Picker failed:", e);
         }
     };
 
     const handleSave = async () => {
-        const res = await callBackend('save_game_config', { 
-            app_id: appId, 
-            interface_path: interfacePath, 
-            status_path: statusPath 
-        });
-        if (res && res.success) {
+        const res = parseResult(await saveGameConfig({ app_id: appId, interface_path: interfacePath, status_path: statusPath }));
+        if (res?.success) {
             loadData();
-        } else {
-            alert("Save failed. Check console.");
         }
     };
 
@@ -127,28 +83,31 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
-            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
+            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings</h2>
             
             <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH (Metadata)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={interfacePath} onChange={e => setInterfacePath(e.target.value)} />
-                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={(e) => { e.preventDefault(); handleBrowse(setInterfacePath); }}>📁</button>
+                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setInterfacePath)}>📁</button>
                 </div>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH (Unlocks)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={statusPath} onChange={e => setStatusPath(e.target.value)} />
-                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={(e) => { e.preventDefault(); handleBrowse(setStatusPath); }}>📁</button>
+                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setStatusPath)}>📁</button>
                 </div>
             </div>
 
-            <button style={{ width: '100%', background: '#1a9fff', border: 'none', color: 'white', padding: '12px', fontWeight: 'bold', cursor: 'pointer' }} onClick={(e) => { e.preventDefault(); handleSave(); }}>Save Settings</button>
+            <button style={{ width: '100%', background: '#1a9fff', border: 'none', color: 'white', padding: '12px', fontWeight: 'bold', cursor: 'pointer' }} onClick={handleSave}>Save Settings</button>
 
             {achievements.length > 0 && (
                 <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>
+                        {achievements.filter(a=>a.unlocked).length} / {achievements.length} Achievements
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxHeight: '250px', overflowY: 'auto' }}>
                         {achievements.map(a => <AchievementItem key={a.name} a={a} />)}
                     </div>
@@ -161,12 +120,17 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 const showGSEConfig = (appId: string, doc: Document) => {
     const modalRoot = doc.createElement('div');
     doc.body.appendChild(modalRoot);
-    const rd = getGlobal('SP_REACTDOM');
+    
+    // Find renderer local to the window
+    const win = (doc.defaultView || window) as any;
+    const rd = win.SP_REACTDOM || win.ReactDOM || (window as any).SP_REACTDOM;
+    
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
         else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
         modalRoot.remove();
     };
+
     const element = (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }} onClick={onClose}>
             <div style={{ width: '600px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
@@ -177,18 +141,25 @@ const showGSEConfig = (appId: string, doc: Document) => {
             </div>
         </div>
     );
-    if (rd?.createRoot) {
-        if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
-        (modalRoot as any)._gseRoot.render(element);
-    } else if (rd?.render) {
-        rd.render(element, modalRoot);
+
+    try {
+        if (rd?.createRoot) {
+            if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
+            (modalRoot as any)._gseRoot.render(element);
+        } else if (rd?.render) {
+            rd.render(element, modalRoot);
+        }
+    } catch (e) {
+        log("Render Error:", e);
     }
 };
 
 let lastAppId: string | null = null;
 
 const processInjection = async (doc: Document) => {
-    const manager = getGlobal('MainWindowBrowserManager');
+    const win = (doc.defaultView || window) as any;
+    const gWin = window as any;
+    const manager = gWin.MainWindowBrowserManager || win.MainWindowBrowserManager;
     let appId = null;
     if (manager?.m_lastLocation?.pathname) {
         const match = manager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
@@ -241,6 +212,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
+        content: <div style={{padding: '20px'}}>GSE Active.</div>,
     };
 });

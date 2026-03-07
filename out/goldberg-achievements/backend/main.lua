@@ -36,57 +36,33 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- EXTREMELY ROBUST ARGUMENT EXTRACTOR
--- Millennium sometimes shifts arguments. We scan for our AppID/Table.
-local function get_payload(...)
-    local args = {...}
-    
-    -- Print argument summary to Steam Console for debugging
-    local log_str = "GSE ARGS: "
-    for i, v in ipairs(args) do
-        log_str = log_str .. "[" .. i .. ":" .. type(v) .. "] "
+-- Simple, safe argument extractor
+local function get_payload(payload)
+    if type(payload) == "string" then
+        local decoded = safe_decode(payload)
+        if type(decoded) == "table" then return decoded end
+        return { app_id = payload } -- Treat raw string as AppID
     end
-    print(log_str)
-
-    for i, v in ipairs(args) do
-        -- 1. Look for a table with our data
-        if type(v) == "table" and v.app_id then
-            return v
-        end
-        -- 2. Look for a string that could be a JSON payload
-        if type(v) == "string" and v:sub(1,1) == "{" then
-            local decoded = safe_decode(v)
-            if type(decoded) == "table" and decoded.app_id then
-                return decoded
-            end
-        end
-        -- 3. Look for a string that is a numeric AppID
-        if type(v) == "string" and v:match("^%d+$") then
-            return {
-                app_id = v,
-                interface_path = args[i+1] or "",
-                status_path = args[i+2] or ""
-            }
-        end
-    end
-    
+    if type(payload) == "table" then return payload end
     return {}
 end
 
 -- Exposed Methods
-function get_game_config(...)
-    local p = get_payload(...)
+function get_game_config(payload)
+    local p = get_payload(payload)
     local id = tostring(p.app_id or "nil")
-    print("GSE: Fetching config for " .. id)
+    print("GSE: get_game_config for " .. id)
     return json.encode(configs[id] or {})
 end
 
-function save_game_config(...)
-    local p = get_payload(...)
+function save_game_config(payload)
+    local p = get_payload(payload)
     local id = tostring(p.app_id or "")
-    print("GSE: Saving config for " .. id)
+    print("GSE: save_game_config for " .. id)
     
-    if id == "" then return json.encode({ success = false, error = "Backend Error: Missing AppID" }) end
+    if id == "" or id == "nil" then 
+        return json.encode({ success = false, error = "No AppID detected" }) 
+    end
 
     configs[id] = { 
         interface_path = p.interface_path or "", 
@@ -95,17 +71,17 @@ function save_game_config(...)
     
     local ok = safe_write_file(settings_path, json.encode(configs))
     
-    -- Cache status
+    -- Cache status immediately
     local status_data = safe_decode(safe_read_file(p.status_path))
     if status_data then last_status_map[id] = status_data end
     
     return json.encode({ success = ok })
 end
 
-function get_achievements(...)
-    local p = get_payload(...)
+function get_achievements(payload)
+    local p = get_payload(payload)
     local id = tostring(p.app_id or "nil")
-    print("GSE: Fetching achievements for " .. id)
+    print("GSE: get_achievements for " .. id)
     
     local cfg = configs[id]
     if not cfg then return json.encode({}) end
@@ -135,7 +111,7 @@ end
 
 -- Lifecycle
 local function on_load()
-    print("GSE Backend Init")
+    print("GSE Backend Loaded")
     local content = safe_read_file(settings_path)
     if content then configs = safe_decode(content) or {} end
     millennium.ready()
