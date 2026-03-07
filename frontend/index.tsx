@@ -199,20 +199,31 @@ const processInjection = async (doc: Document) => {
     }
 
     // 1. Link Bar Injection (Desktop)
-    const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
+    // .DgVQapkBmhAW6oPY5rPZo is a common class for the links bar, but we'll try to find it by structure too
+    const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo') || 
+                     Array.from(doc.querySelectorAll('div')).find(el => el.className.includes('DetailsCustomLinks'));
+    
     if (linksBar) {
         let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
-        const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
-        const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
-        if (lastSteamBtn) {
-            if (!btn) {
+        if (!btn) {
+            const steamButtons = Array.from(linksBar.children).filter(c => (c as HTMLElement).style.left);
+            const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
+            
+            if (lastSteamBtn) {
                 btn = doc.createElement('div');
                 btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
                 btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
                 linksBar.appendChild(btn);
+                btn.style.cssText = `left: ${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px; top: 0px; position: absolute;`;
+                btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId!, doc); };
             }
-            btn.style.cssText = `left: ${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px; top: 0px; position: absolute;`;
-            btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId!, doc); };
+        } else {
+            // Re-sync position if needed
+            const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
+            const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
+            if (lastSteamBtn) {
+                btn.style.left = `${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px`;
+            }
         }
     }
 
@@ -229,9 +240,12 @@ const processInjection = async (doc: Document) => {
 
 export default definePlugin(() => {
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
-        if (!context.m_strName?.startsWith("SP ")) return;
+        // Hook both Big Picture (SP) and Desktop (Steam) windows
+        if (!context.m_strName?.startsWith("SP ") && context.m_strName !== "Steam") return;
+        
         const doc = context.m_popup?.document;
         if (!doc?.body) return;
+
         const observer = new MutationObserver(() => processInjection(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
         processInjection(doc);
