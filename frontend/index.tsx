@@ -143,7 +143,7 @@ const AchievementsView = ({ appId, isBPM, doc }: { appId: string, isBPM: boolean
             </div>
 
             {(!config || !config.interface_path) ? (
-                <div style={{ color: '#666', fontSize: '12px' }}>Please configure paths in settings. (Detected AppID: {appId})</div>
+                <div style={{ color: '#666', fontSize: '12px' }}>Please configure paths in settings. (ID: {appId})</div>
             ) : (
                 <div style={{ 
                     display: 'grid', 
@@ -191,19 +191,23 @@ const showGSEConfig = (appId: string, doc: Document) => {
 };
 
 const getAppId = (doc: Document) => {
-    // 1. Try URL of this specific document first (most reliable for current view)
-    const url = doc.location.pathname + doc.location.search + doc.location.hash;
-    let id = url.match(/\/app\/(\d+)/)?.[1];
+    const win = (doc.defaultView || window) as any;
+    
+    // 1. Try URL/Path of THIS specific document first (most local and reliable)
+    const localPath = doc.location.pathname || "";
+    let id = localPath.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
     if (id) return id;
 
-    // 2. Try images in THIS document (HLTB style - very reliable)
-    const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"], img[src*="library_hero"], img[src*="/assets/"]') as HTMLImageElement;
-    const match = (hero?.src || hero?.getAttribute('src'))?.match(/\/assets\/(\d+)/);
-    if (match) return match[1];
+    // 2. Try images in THIS document (HLTB style - very reliable for current render)
+    const imgs = Array.from(doc.querySelectorAll('img'));
+    for (const img of imgs) {
+        const src = img.src || img.getAttribute('src') || "";
+        const match = src.match(/\/assets\/(\d+)/) || src.match(/\/app\/(\d+)/);
+        if (match) return match[1];
+    }
 
-    // 3. Fallback to MainWindowBrowserManager (last resort)
-    const win = (doc.defaultView || window) as any;
-    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager || (window as any).MainWindowBrowserManager;
+    // 3. Check local window's MainWindowBrowserManager
+    const manager = win.MainWindowBrowserManager;
     id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     
     return id || null;
@@ -214,18 +218,19 @@ const getAppId = (doc: Document) => {
 const injectedIds = new WeakMap<Document, string>();
 
 const processInjection = async (doc: Document) => {
-    const isDesktop = doc.documentElement.classList.contains("DesktopUI") || doc.body.classList.contains("DesktopUI");
+    const isDesktop = doc.body.classList.contains("DesktopUI") || doc.documentElement.classList.contains("DesktopUI");
     const isBPM = !isDesktop;
 
     const appId = getAppId(doc);
     
+    // If no AppID, cleanup and exit
     if (!appId) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) { existing.remove(); injectedIds.delete(doc); }
         return;
     }
 
-    // BPM-only tab validation
+    // BPM Tab Validation (WhatsNew)
     if (isBPM) {
         const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
                          doc.getElementById('«rod»WhatsNew_Content') ||
@@ -238,35 +243,34 @@ const processInjection = async (doc: Document) => {
         }
     }
 
-    // Handle game switch or missing view
+    // Handle game switch per document
+    if (appId !== injectedIds.get(doc)) {
+        log(`New game detected: ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
+        const existing = doc.querySelector('.gse-injected-view');
+        if (existing) existing.remove();
+        injectedIds.set(doc, appId);
+    }
+
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
-    if (appId !== injectedIds.get(doc) || (container && !container.querySelector('.gse-injected-view'))) {
-        log(`Injecting for ${appId} (Mode: ${isBPM ? 'BPM' : 'Desktop'})`);
-        const existing = doc.querySelector('.gse-injected-view');
-        if (existing) existing.remove();
+    if (container && !container.querySelector('.gse-injected-view')) {
+        const win = (doc.defaultView || window) as any;
+        const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
+        if (!rd) return;
+
+        const injectDiv = doc.createElement('div');
+        injectDiv.className = 'gse-injected-view';
+        injectDiv.style.width = '100%';
+        container.prepend(injectDiv);
+
+        const element = <AchievementsView appId={appId} isBPM={isBPM} doc={doc} />;
         
-        injectedIds.set(doc, appId);
-
-        if (container) {
-            const win = (doc.defaultView || window) as any;
-            const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
-            if (!rd) return;
-
-            const injectDiv = doc.createElement('div');
-            injectDiv.className = 'gse-injected-view';
-            injectDiv.style.width = '100%';
-            container.prepend(injectDiv);
-
-            const element = <AchievementsView appId={appId} isBPM={isBPM} doc={doc} />;
-            
-            if (rd.createRoot) {
-                const root = (injectDiv as any)._gseRoot || rd.createRoot(injectDiv);
-                (injectDiv as any)._gseRoot = root;
-                root.render(element);
-            } else rd.render(element, injectDiv);
-        }
+        if (rd.createRoot) {
+            const root = (injectDiv as any)._gseRoot || rd.createRoot(injectDiv);
+            (injectDiv as any)._gseRoot = root;
+            root.render(element);
+        } else rd.render(element, injectDiv);
     }
 };
 
