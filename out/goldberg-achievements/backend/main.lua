@@ -36,51 +36,77 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- Robust Argument Parser
-local function get_payload(a1, a2, a3)
-    if type(a1) == "table" then 
-        return {
-            app_id = tostring(a1.app_id or a1[1] or ""),
-            interface_path = a1.interface_path or a1[2] or "",
-            status_path = a1.status_path or a1[3] or ""
-        }
-    end
-    if type(a1) == "string" and (a1:sub(1,1) == "{" or a1:sub(1,1) == "[") then
-        local decoded = safe_decode(a1)
-        if type(decoded) == "table" then 
+-- UNIVERSAL ARGUMENT PARSER
+-- Scans all arguments to find AppID and paths, regardless of "self" injection or wrapping
+local function get_args(...)
+    local args = {...}
+    local res = { app_id = "", interface_path = "", status_path = "" }
+    
+    for i, v in ipairs(args) do
+        -- Case 1: Found a table with app_id
+        if type(v) == "table" and v.app_id then
             return {
-                app_id = tostring(decoded.app_id or decoded[1] or ""),
-                interface_path = decoded.interface_path or decoded[2] or "",
-                status_path = decoded.status_path or decoded[3] or ""
+                app_id = tostring(v.app_id),
+                interface_path = v.interface_path or "",
+                status_path = v.status_path or ""
             }
         end
+        -- Case 2: Found a JSON string
+        if type(v) == "string" and (v:sub(1,1) == "{" or v:sub(1,1) == "[") then
+            local decoded = safe_decode(v)
+            if type(decoded) == "table" and decoded.app_id then
+                return {
+                    app_id = tostring(decoded.app_id),
+                    interface_path = decoded.interface_path or "",
+                    status_path = decoded.status_path or ""
+                }
+            end
+        end
+        -- Case 3: Found a string that looks like an AppID
+        if type(v) == "string" and v:match("^%d+$") then
+            res.app_id = v
+            -- If next args exist, they are likely paths
+            if args[i+1] and type(args[i+1]) == "string" then res.interface_path = args[i+1] end
+            if args[i+2] and type(args[i+2]) == "string" then res.status_path = args[i+2] end
+            return res
+        end
     end
-    return {
-        app_id = tostring(a1 or ""),
-        interface_path = tostring(a2 or ""),
-        status_path = tostring(a3 or "")
-    }
+    return res
 end
 
 -- Exposed Methods
-function get_game_config(a1, a2, a3)
-    local p = get_payload(a1, a2, a3)
+function get_game_config(...)
+    local p = get_args(...)
+    print("GSE: get_game_config for " .. tostring(p.app_id))
     return json.encode(configs[p.app_id] or {})
 end
 
-function save_game_config(a1, a2, a3)
-    local p = get_payload(a1, a2, a3)
-    if p.app_id == "" or p.app_id == "nil" then return json.encode({ success = false, error = "No AppID" }) end
-    configs[p.app_id] = { interface_path = p.interface_path, status_path = p.status_path }
+function save_game_config(...)
+    local p = get_args(...)
+    print("GSE: save_game_config for " .. tostring(p.app_id))
+    
+    if p.app_id == "" then 
+        return json.encode({ success = false, error = "Backend Error: Could not find AppID in arguments" }) 
+    end
+
+    configs[p.app_id] = { 
+        interface_path = p.interface_path, 
+        status_path = p.status_path 
+    }
+    
     local ok = safe_write_file(settings_path, json.encode(configs))
+    
     -- Cache status immediately
     local status_data = safe_decode(safe_read_file(p.status_path))
     if status_data then last_status_map[p.app_id] = status_data end
+    
     return json.encode({ success = ok })
 end
 
-function get_achievements(a1, a2, a3)
-    local p = get_payload(a1, a2, a3)
+function get_achievements(...)
+    local p = get_args(...)
+    print("GSE: get_achievements for " .. tostring(p.app_id))
+    
     local cfg = configs[p.app_id]
     if not cfg then return json.encode({}) end
     
@@ -100,7 +126,6 @@ function get_achievements(a1, a2, a3)
                 display_name = ach.displayName or ach.name,
                 description = ach.description or "",
                 unlocked = is_unlocked,
-                -- Send the full local path for the icon
                 icon = (icon_rel and icon_rel ~= "") and (base_dir .. icon_rel) or ""
             })
         end
@@ -110,12 +135,9 @@ end
 
 -- Lifecycle
 local function on_load()
+    print("GSE Achievements Backend Loading")
     local content = safe_read_file(settings_path)
     if content then configs = safe_decode(content) or {} end
-    for id, c in pairs(configs) do
-        local data = safe_decode(safe_read_file(c.status_path))
-        if data then last_status_map[id] = data end
-    end
     millennium.ready()
 end
 
