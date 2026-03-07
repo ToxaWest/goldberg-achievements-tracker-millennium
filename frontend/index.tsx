@@ -191,17 +191,12 @@ const showGSEConfig = (appId: string, doc: Document) => {
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
     
-    // 1. Try SteamClient synchronous AppID (very reliable if present)
-    if (win.SteamClient?.Apps?.GetAppID) {
-        try {
-            const id = win.SteamClient.Apps.GetAppID();
-            if (id && id > 0) return id.toString();
-        } catch(e) {}
-    }
-
-    // 2. Try window's own MainWindowBrowserManager
-    const manager = win.MainWindowBrowserManager;
-    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    // 1. Try window's own MainWindowBrowserManager (prioritize browsed game)
+    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
+    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    
+    // 2. Try window location href
+    if (!id) id = doc.location.href.match(/\/app\/(\d+)/)?.[1];
     
     if (id) return id;
 
@@ -220,7 +215,9 @@ const getAppId = (doc: Document) => {
 const injectedIds = new WeakMap<Document, string>();
 
 const processInjection = async (doc: Document) => {
-    const isBPM = !doc.body.classList.contains("DesktopUI");
+    const isDesktop = doc.body.classList.contains("DesktopUI") || document.body.classList.contains("DesktopUI");
+    const isBPM = !isDesktop;
+
     const appId = getAppId(doc);
     if (!appId) return;
 
@@ -239,6 +236,7 @@ const processInjection = async (doc: Document) => {
 
     // Handle game switch per document
     if (appId !== injectedIds.get(doc)) {
+        log(`Game changed or new injection for ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) existing.remove();
         injectedIds.set(doc, appId);
@@ -248,8 +246,6 @@ const processInjection = async (doc: Document) => {
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
     if (container && !container.querySelector('.gse-injected-view')) {
-        log(`Injecting Achievements for ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
-        
         const win = (doc.defaultView || window) as any;
         const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
         if (!rd) return;
