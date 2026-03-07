@@ -1,6 +1,5 @@
 import { Millennium, definePlugin, callable, IconsModule, Field, DialogButton, TextField } from '@steambrew/client';
 import React from 'react';
-import ReactDOM from 'react-dom';
 
 const getGameConfig = callable<[{ app_id: string }], any>('get_game_config');
 const getAchievements = callable<[{ app_id: string }], any>('get_achievements');
@@ -10,32 +9,50 @@ const log = (...args: any[]) => console.log("[GSE]", ...args);
 
 let lastAppId: string | null = null;
 
+/**
+ * Robust renderer helper
+ */
+const renderInContainer = (element: React.ReactElement, container: HTMLElement) => {
+    try {
+        const win = window as any;
+        const rd = win.ReactDOM || win.opener?.ReactDOM || win.parent?.ReactDOM;
+        if (!rd) return;
+
+        if (rd.createRoot) {
+            if (!(container as any)._gseRoot) (container as any)._gseRoot = rd.createRoot(container);
+            (container as any)._gseRoot.render(element);
+        } else {
+            rd.render(element, container);
+        }
+    } catch (e) {}
+};
+
 const getAppId = async (doc: Document): Promise<string | null> => {
     const win = (doc.defaultView || window) as any;
+    const gWin = window as any;
     
     // 1. Try MainWindowBrowserManager (The most reliable for SPA navigation)
-    if (win.MainWindowBrowserManager?.m_lastLocation?.pathname) {
-        const match = win.MainWindowBrowserManager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
+    // We check both the document's window and the global window
+    const manager = gWin.MainWindowBrowserManager || win.MainWindowBrowserManager;
+    if (manager?.m_lastLocation?.pathname) {
+        const match = manager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
         if (match) return match[1];
     }
 
     // 2. Try SteamClient API
-    if (win.SteamClient?.Apps?.GetActiveAppID) {
+    const sc = win.SteamClient || gWin.SteamClient;
+    if (sc?.Apps?.GetActiveAppID) {
         try {
-            const appId = await win.SteamClient.Apps.GetActiveAppID();
+            const appId = await sc.Apps.GetActiveAppID();
             if (appId && appId > 0) return String(appId);
         } catch (e) {}
     }
 
-    // 3. Try URL parsing
-    const match = win.location.href.match(/\/app\/(\d+)/) || win.location.href.match(/appid=(\d+)/);
-    if (match) return match[1];
-
-    // 4. Image-based fallback (HLTB method)
+    // 3. Fallback to image-based detection (HLTB's appIdPattern)
     const images = doc.querySelectorAll('img[src*="/assets/"]');
     for (const img of Array.from(images) as HTMLImageElement[]) {
-        const imgMatch = img.src.match(/\/assets\/(\d+)/);
-        if (imgMatch) return imgMatch[1];
+        const match = img.src.match(/\/assets\/(\d+)/);
+        if (match) return match[1];
     }
     
     return null;
@@ -76,26 +93,19 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
         if (res?.success) {
             const data = await getAchievements({ app_id: appId });
             setAchievements(data || []);
-            alert("✅ Settings saved for " + gameName);
+            alert("✅ Settings saved!");
         }
     };
 
     return (
-        <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px' }}>
-            <h2 style={{ marginBottom: '20px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>{gameName} Configuration</h2>
-            <Field label="Achievements Interface Path (Metadata)">
-                <TextField value={interfacePath} onChange={(e:any)=>setInterfacePath(e.target.value)} />
-            </Field>
-            <Field label="Achievements Status Path (Unlocked)">
-                <TextField value={statusPath} onChange={(e:any)=>setStatusPath(e.target.value)} />
-            </Field>
-            <DialogButton onClick={handleSave} style={{ width: '100%', marginTop: '20px' }}>Save Settings</DialogButton>
+        <div style={{ padding: '20px', color: 'white', backgroundColor: '#1b2838' }}>
+            <h3 style={{ marginBottom: '15px' }}>{gameName}</h3>
+            <Field label="Interface Path"><TextField value={interfacePath} onChange={(e:any)=>setInterfacePath(e.target.value)} /></Field>
+            <Field label="Status Path"><TextField value={statusPath} onChange={(e:any)=>setStatusPath(e.target.value)} /></Field>
+            <DialogButton onClick={handleSave} style={{ width: '100%', marginTop: '10px' }}>Save Settings</DialogButton>
             {achievements.length > 0 && (
-                <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
-                    <div style={{ marginBottom: '10px', fontSize: '14px', color: '#888' }}>{achievements.filter(a=>a.unlocked).length} / {achievements.length} Unlocked</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px', maxHeight: '200px', overflowY: 'auto', padding: '10px', background: 'rgba(0,0,0,0.2)' }}>
-                        {achievements.map(a => (<div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}</div>))}
-                    </div>
+                <div style={{ marginTop: '15px', maxHeight: '150px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', padding: '10px' }}>
+                    {achievements.map(a => (<div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#666' }}>{a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}</div>))}
                 </div>
             )}
         </div>
@@ -105,22 +115,21 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 const showGSEConfig = (appId: string) => {
     const modalRoot = document.createElement('div');
     document.body.appendChild(modalRoot);
-    
     const onClose = () => {
-        ReactDOM.unmountComponentAtNode(modalRoot);
+        const win = window as any;
+        const rd = win.ReactDOM || win.opener?.ReactDOM || win.parent?.ReactDOM;
+        if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
         modalRoot.remove();
     };
-
-    const element = (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }} onClick={onClose}>
-            <div style={{ width: '600px', background: '#1e2127', borderRadius: '8px', border: '1px solid #3d4450', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
+    renderInContainer(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onClose}>
+            <div style={{ width: '500px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
                 <GSEGameSettings appId={appId} />
-                <div style={{ padding: '15px', textAlign: 'right', borderTop: '1px solid #333' }}><DialogButton onClick={onClose}>Close</DialogButton></div>
+                <div style={{ padding: '10px', textAlign: 'right' }}><DialogButton onClick={onClose}>Close</DialogButton></div>
             </div>
-        </div>
+        </div>,
+        modalRoot
     );
-
-    ReactDOM.render(element, modalRoot);
 };
 
 const processInjection = async (doc: Document) => {
@@ -128,22 +137,19 @@ const processInjection = async (doc: Document) => {
     if (!appId) return;
 
     if (appId !== lastAppId) {
-        log("Game Page:", appId);
+        log("Found game page for appId:", appId);
         lastAppId = appId;
     }
 
-    // 1. Links Bar Injection
+    // 1. Links Bar
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
     if (linksBar) {
-        const existing = linksBar.querySelector('.gse-details-button');
-        
-        // Find the absolute right edge of the last Steam button
+        const existing = linksBar.querySelector('.gse-details-button') as HTMLElement;
         const steamButtons = Array.from(linksBar.children).filter(c => c !== existing && (c as HTMLElement).style.left);
         const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
         
         if (lastSteamBtn) {
             const nextLeft = parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8;
-            
             if (!existing) {
                 const btn = doc.createElement('div');
                 btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
@@ -152,13 +158,13 @@ const processInjection = async (doc: Document) => {
                 btn.onclick = () => showGSEConfig(appId);
                 linksBar.appendChild(btn);
             } else {
-                (existing as HTMLElement).style.left = `${nextLeft}px`;
-                (existing as any).onclick = () => showGSEConfig(appId); // Update appId reference
+                existing.style.left = `${nextLeft}px`;
+                existing.onclick = () => showGSEConfig(appId);
             }
         }
     }
 
-    // 2. General Properties Injection
+    // 2. General Properties
     const generalTarget = Array.from(doc.querySelectorAll('*')).find((el: any) => 
         (el.innerText === 'Launch Options' || el.innerText === 'LAUNCH OPTIONS' || el.innerText === 'Steam Cloud') && el.offsetWidth > 0
     );
@@ -167,15 +173,15 @@ const processInjection = async (doc: Document) => {
         if (target) {
             const injectDiv = doc.createElement('div');
             injectDiv.className = 'gse-general-injected';
-            injectDiv.style.cssText = 'margin: 20px 0; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);';
+            injectDiv.style.cssText = 'margin: 20px 0; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);';
             target.parentElement?.insertBefore(injectDiv, target);
-            ReactDOM.render(<GSEGameSettings appId={appId} />, injectDiv);
+            renderInContainer(<GSEGameSettings appId={appId} />, injectDiv);
         }
     }
 };
 
 export default definePlugin(() => {
-    log("Plugin Loading...");
+    log("Plugin Entry");
 
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
         if (!context.m_strName?.startsWith("SP ")) return;
@@ -193,6 +199,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>Check Game Properties or Details to configure achievements.</div>,
+        content: <div style={{padding: '20px'}}>Plugin Active.</div>,
     };
 });
