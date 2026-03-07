@@ -36,88 +36,53 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- UNIVERSAL ARGUMENT PARSER
-local function get_args(...)
-    local args = {...}
-    -- Check if args are wrapped in a table (Millennium quirk)
-    if #args == 1 and type(args[1]) == "table" and args[1][1] then
-        args = args[1]
+-- Robust JSON payload handler
+local function get_payload(payload)
+    print("GSE DEBUG: Payload type is " .. type(payload))
+    if type(payload) == "string" then
+        print("GSE DEBUG: Decoding JSON payload...")
+        local decoded = safe_decode(payload)
+        if type(decoded) == "table" then return decoded end
     end
-
-    print("GSE DEBUG: Parsing " .. #args .. " args")
-    for i, v in ipairs(args) do
-        print("  [" .. i .. "] type: " .. type(v) .. " value: " .. tostring(v))
-    end
-
-    local res = { app_id = "", interface_path = "", status_path = "" }
-    
-    for i, v in ipairs(args) do
-        -- Case 1: Found a table with app_id
-        if type(v) == "table" and v.app_id then
-            return {
-                app_id = tostring(v.app_id),
-                interface_path = v.interface_path or "",
-                status_path = v.status_path or ""
-            }
-        end
-        -- Case 2: Found a JSON string
-        if type(v) == "string" and (v:sub(1,1) == "{" or v:sub(1,1) == "[") then
-            local decoded = safe_decode(v)
-            if type(decoded) == "table" and decoded.app_id then
-                return {
-                    app_id = tostring(decoded.app_id),
-                    interface_path = decoded.interface_path or "",
-                    status_path = decoded.status_path or ""
-                }
-            end
-        end
-        -- Case 3: Found a string that looks like an AppID
-        if type(v) == "string" and v:match("^%d+$") then
-            res.app_id = v
-            -- Look ahead for paths
-            if args[i+1] and type(args[i+1]) == "string" then res.interface_path = args[i+1] end
-            if args[i+2] and type(args[i+2]) == "string" then res.status_path = args[i+2] end
-            return res
-        end
-    end
-    
-    return res
+    if type(payload) == "table" then return payload end
+    return {}
 end
 
 -- Exposed Methods
-function get_game_config(...)
-    local p = get_args(...)
-    print("GSE: get_game_config for " .. tostring(p.app_id))
-    return json.encode(configs[p.app_id] or {})
+function get_game_config(payload)
+    local p = get_payload(payload)
+    local id = tostring(p.app_id or "nil")
+    print("GSE: get_game_config for " .. id)
+    return json.encode(configs[id] or {})
 end
 
-function save_game_config(...)
-    local p = get_args(...)
-    print("GSE: save_game_config for " .. tostring(p.app_id))
+function save_game_config(payload)
+    local p = get_payload(payload)
+    local id = tostring(p.app_id or "")
+    print("GSE: save_game_config for " .. id)
     
-    if p.app_id == "" then 
-        return json.encode({ success = false, error = "Backend Error: Could not find AppID in arguments" }) 
-    end
+    if id == "" then return json.encode({ success = false, error = "Backend Error: Missing AppID" }) end
 
-    configs[p.app_id] = { 
-        interface_path = p.interface_path, 
-        status_path = p.status_path 
+    configs[id] = { 
+        interface_path = p.interface_path or "", 
+        status_path = p.status_path or "" 
     }
     
     local ok = safe_write_file(settings_path, json.encode(configs))
     
-    -- Cache status immediately
+    -- Cache status
     local status_data = safe_decode(safe_read_file(p.status_path))
-    if status_data then last_status_map[p.app_id] = status_data end
+    if status_data then last_status_map[id] = status_data end
     
     return json.encode({ success = ok })
 end
 
-function get_achievements(...)
-    local p = get_args(...)
-    print("GSE: get_achievements for " .. tostring(p.app_id))
+function get_achievements(payload)
+    local p = get_payload(payload)
+    local id = tostring(p.app_id or "nil")
+    print("GSE: get_achievements for " .. id)
     
-    local cfg = configs[p.app_id]
+    local cfg = configs[id]
     if not cfg then return json.encode({}) end
     
     local meta = safe_decode(safe_read_file(cfg.interface_path)) or {}
