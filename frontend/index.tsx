@@ -190,21 +190,34 @@ const showGSEConfig = (appId: string, doc: Document) => {
 
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
-    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
-    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href.match(/\/app\/(\d+)/)?.[1];
-    if (!id) {
-        const imgs = Array.from(doc.querySelectorAll('img'));
-        for (const img of imgs) {
-            const match = (img.src || "").match(/\/assets\/(\d+)/);
-            if (match) return match[1];
-        }
+    
+    // 1. Try SteamClient synchronous AppID (very reliable if present)
+    if (win.SteamClient?.Apps?.GetAppID) {
+        try {
+            const id = win.SteamClient.Apps.GetAppID();
+            if (id && id > 0) return id.toString();
+        } catch(e) {}
     }
-    return id;
+
+    // 2. Try window's own MainWindowBrowserManager
+    const manager = win.MainWindowBrowserManager;
+    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    
+    if (id) return id;
+
+    // 3. Try assets check (reliable fallback for game pages)
+    const imgs = Array.from(doc.querySelectorAll('img'));
+    for (const img of imgs) {
+        const match = (img.src || "").match(/\/assets\/(\d+)/);
+        if (match) return match[1];
+    }
+    
+    return null;
 };
 
 // --- Core Logic ---
 
-let lastInjectedAppId: string | null = null;
+const injectedIds = new WeakMap<Document, string>();
 
 const processInjection = async (doc: Document) => {
     const isBPM = !doc.body.classList.contains("DesktopUI");
@@ -219,15 +232,16 @@ const processInjection = async (doc: Document) => {
 
         if (!whatsNew) {
             const existing = doc.querySelector('.gse-injected-view');
-            if (existing) { existing.remove(); lastInjectedAppId = null; }
+            if (existing) { existing.remove(); injectedIds.delete(doc); }
             return;
         }
     }
 
-    if (appId !== lastInjectedAppId) {
+    // Handle game switch per document
+    if (appId !== injectedIds.get(doc)) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) existing.remove();
-        lastInjectedAppId = appId;
+        injectedIds.set(doc, appId);
     }
 
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
