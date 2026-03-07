@@ -211,15 +211,17 @@ const processInjection = async (doc: Document) => {
     const appId = getAppId(doc);
     if (!appId) return;
 
-    // Check for "What's New" content - robust detection
-    const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
-                     doc.getElementById('«rod»WhatsNew_Content') ||
-                     doc.querySelector('[id*="WhatsNew_Content"]');
+    // Check for "What's New" content - robust detection (BPM only as it has many tabs)
+    if (isBPM) {
+        const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
+                         doc.getElementById('«rod»WhatsNew_Content') ||
+                         doc.querySelector('[id*="WhatsNew_Content"]');
 
-    if (!whatsNew) {
-        const existing = doc.querySelector('.gse-injected-view');
-        if (existing) { existing.remove(); lastInjectedAppId = null; }
-        return;
+        if (!whatsNew) {
+            const existing = doc.querySelector('.gse-injected-view');
+            if (existing) { existing.remove(); lastInjectedAppId = null; }
+            return;
+        }
     }
 
     if (appId !== lastInjectedAppId) {
