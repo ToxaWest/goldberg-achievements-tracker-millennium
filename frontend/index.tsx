@@ -193,24 +193,49 @@ const injectDesktop = (doc: Document) => {
         lastDesktopAppId = appId;
     }
 
-    const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
-    if (!linksBar) return;
+    // New injection point: Action buttons container near Play button (works for non-steam games)
+    const actionsContainer = doc.querySelector('._3oddBTkj_FjknCgBnPqcmQ') || 
+                             doc.querySelector('[class*="gamepaddetails_ControlsContainer"]'); // Fallback
 
-    let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
-    const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
-    const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
-    
-    if (lastSteamBtn) {
-        const leftPos = parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8;
+    if (actionsContainer) {
+        let btn = actionsContainer.querySelector('.gse-details-button') as HTMLElement;
         if (!btn) {
-            log("Desktop linksBar found, injecting button for AppID:", appId);
+            log("Desktop actionsContainer found, injecting button.");
             btn = doc.createElement('div');
-            btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
-            btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
-            linksBar.appendChild(btn);
+            // Matching Steam's button class for consistent styling
+            btn.className = '_3qDWQGB0rtwM3qpXTb11Q- Focusable gse-details-button';
+            btn.setAttribute('role', 'button');
+            btn.setAttribute('tabindex', '0');
+            btn.setAttribute('aria-label', 'GSE Achievements');
+            
+            // Using a simple trophy-like icon or a placeholder
+            btn.innerHTML = `<svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor; margin-top: 4px;"><path d="M18,2H6C4.9,2,4,2.9,4,4v2c0,2.2,1.8,4,4,4h1v1.7c-2.3,0.5-4,2.5-4,4.8V20h16v-1.5c0-2.3-1.7-4.3-4-4.8V10h1c2.2,0,4-1.8,4-4V4 C20,2.9,19.1,2,18,2z M6,6V4h2v2H6z M18,6h-2V4h2V6z"></path></svg>`;
+            
+            actionsContainer.appendChild(btn);
             btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
         }
-        btn.style.cssText = `left: ${leftPos}px; top: 0px; position: absolute;`;
+        return;
+    }
+
+    // Legacy fallback for linksBar
+    const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
+    if (linksBar) {
+        let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
+        const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
+        const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
+        
+        if (lastSteamBtn) {
+            const leftPos = parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8;
+            if (!btn) {
+                log("Desktop linksBar found, injecting button.");
+                btn = doc.createElement('div');
+                btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
+                btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
+                linksBar.appendChild(btn);
+                btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
+            }
+            btn.style.cssText = `left: ${leftPos}px; top: 0px; position: absolute;`;
+        }
     }
 };
 
@@ -285,29 +310,31 @@ const injectBPM = async (doc: Document) => {
     }
 };
 
+const processInjection = (doc: Document) => {
+    const isDesktop = doc.body.classList.contains("DesktopUI");
+    if (isDesktop) {
+        injectDesktop(doc);
+    } else {
+        injectBPM(doc);
+    }
+};
+
 export default definePlugin(() => {
     log("GSE Plugin Initialized");
 
-    const desktopObserver = new MutationObserver(() => injectDesktop(document));
-    desktopObserver.observe(document.body, { childList: true, subtree: true });
-    injectDesktop(document);
+    // Main window observer
+    const mainObserver = new MutationObserver(() => processInjection(document));
+    mainObserver.observe(document.body, { childList: true, subtree: true });
+    processInjection(document);
 
+    // Additional windows hook
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
-        const name = context.m_strName || "Unknown";
         const doc = context.m_popup?.document;
         if (!doc?.body) return;
-
-        log("Window Created hook triggered for:", name);
-
-        const observer = new MutationObserver(() => {
-            injectDesktop(doc);
-            injectBPM(doc);
-        });
         
+        const observer = new MutationObserver(() => processInjection(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
-        
-        injectDesktop(doc);
-        injectBPM(doc);
+        processInjection(doc);
     });
 
     return { title: "GSE Achievements", icon: <IconsModule.Settings />, content: <div style={{padding: '20px'}}>GSE active.</div> };
