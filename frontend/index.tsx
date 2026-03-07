@@ -4,7 +4,7 @@ import React from 'react';
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
 /**
- * Robust global discovery
+ * Enhanced global discovery
  */
 const getGlobal = (name: string): any => {
     const win = window as any;
@@ -12,12 +12,10 @@ const getGlobal = (name: string): any => {
     for (const s of sources) {
         if (s && s[name]) return s[name];
     }
-    
     const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
     if (manager) {
         if (manager[name]) return manager[name];
         if (manager.m_browser && manager.m_browser[name]) return manager.m_browser[name];
-        if (manager.m_browser?.window && manager.m_browser.window[name]) return manager.m_browser.window[name];
     }
     return null;
 };
@@ -26,30 +24,42 @@ const callBackend = async (method: string, args: any) => {
     const m = getGlobal('Millennium');
     if (!m?.callServerMethod) return null;
     try {
-        log(`Backend Call: ${method}`, args);
-        // Match HLTB: pass as ONE object. Lua is now flexible enough to handle it.
-        const res = await m.callServerMethod("goldberg-achievements", method, args);
-        log(`Backend Raw Result (${method}):`, res);
-        
+        const res = await m.callServerMethod("goldberg-achievements", method, args.app_id, args.interface_path || "", args.status_path || "");
         if (typeof res === 'string') {
             try { return JSON.parse(res); } catch (e) { return res; }
         }
         return res;
     } catch (e) {
-        log(`Backend Exception (${method}):`, e);
+        log(`Backend error (${method}):`, e);
         return null;
     }
 };
 
-const notify = (title: string, message: string) => {
-    const sc = getGlobal('SteamClient');
-    // Notification can be in sc.Notifications or sc directly
-    const fn = sc?.Notifications?.DisplayNotification || sc?.DisplayNotification;
-    if (typeof fn === 'function') {
-        fn.call(sc?.Notifications || sc, title, message, "", "");
-    } else {
-        log("NOTIFY FALLBACK:", title, message);
-    }
+const AchievementItem = ({ a }: { a: any }) => {
+    const iconUrl = a.icon ? "file:///" + a.icon.replace(/\\/g, '/') : null;
+    
+    return (
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ width: '42px', height: '42px', background: '#333', flexShrink: 0, borderRadius: '4px', overflow: 'hidden', position: 'relative' }}>
+                {iconUrl ? (
+                    <img src={iconUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: a.unlocked ? 1 : 0.3, filter: a.unlocked ? 'none' : 'grayscale(1)' }} />
+                ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', fontSize: '20px' }}>?</div>
+                )}
+                {a.unlocked && (
+                    <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', background: '#4caf50', borderRadius: '50%', width: '14px', height: '14px', border: '2px solid #1b2838', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px' }}>✓</div>
+                )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: a.unlocked ? '#fff' : '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {a.display_name}
+                </div>
+                <div style={{ fontSize: '11px', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {a.description}
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const GSEGameSettings = ({ appId }: { appId: string }) => {
@@ -74,19 +84,12 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     const handleBrowse = async (setter: (val: string) => void) => {
         const sc = getGlobal('SteamClient');
-        
-        // Final attempt to find picker: Scan all sub-objects recursively
         const findPicker = (obj: any): any => {
             if (!obj) return null;
-            // Check direct
             if (typeof obj.OpenFilePicker === 'function') return obj.OpenFilePicker.bind(obj);
-            // Check sub-modules (Windows, Browser, etc)
-            for (const key of ['Window', 'Browser', 'System', 'BrowserView', 'Overlay']) {
-                const sub = obj[key];
-                if (sub && typeof sub.OpenFilePicker === 'function') return sub.OpenFilePicker.bind(sub);
-            }
-            // Deep search all keys
-            for (const key of Object.keys(obj)) {
+            // Search all properties including non-enumerable
+            const props = Object.getOwnPropertyNames(obj);
+            for (const key of props) {
                 try {
                     const sub = obj[key];
                     if (sub && typeof sub.OpenFilePicker === 'function') return sub.OpenFilePicker.bind(sub);
@@ -95,41 +98,26 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             return null;
         };
 
-        const picker = findPicker(sc) || findPicker((window.opener as any)?.SteamClient) || findPicker((window.top as any)?.SteamClient);
+        const picker = findPicker(sc) || findPicker((window as any).opener?.SteamClient);
         
         if (!picker) {
-            log("Picker Error. SC keys:", sc ? Object.keys(sc) : "NULL");
             alert("File picker not found. Please paste path manually.");
             return;
         }
 
         try {
-            log("Opening Picker...");
             const path = await picker("Select achievements.json", "", false);
-            if (path) {
-                const normalized = path.replace(/\\/g, '/').replace(/"/g, '').trim();
-                setter(normalized);
-            }
+            if (path) setter(path.replace(/\\/g, '/').replace(/"/g, '').trim());
         } catch (e) {
-            log("Picker exception:", e);
+            log("Picker error:", e);
         }
     };
 
     const handleSave = async () => {
-        log("Save Button Pressed. AppID:", appId);
-        const res = await callBackend('save_game_config', { 
-            app_id: appId, 
-            interface_path: interfacePath, 
-            status_path: statusPath 
-        });
-        
-        if (res && res.success) {
-            notify("GSE", "Settings saved successfully!");
+        const res = await callBackend('save_game_config', { app_id: appId, interface_path: interfacePath, status_path: statusPath });
+        if (res?.success) {
             const data = await callBackend('get_achievements', { app_id: appId });
             setAchievements(Array.isArray(data) ? data : []);
-        } else {
-            log("Backend Save Failed:", res);
-            notify("GSE Error", "Backend failed to save settings.");
         }
     };
 
@@ -140,7 +128,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
             
             <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH (Metadata)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={interfacePath} onChange={e => setInterfacePath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setInterfacePath)}>📁</button>
@@ -148,7 +136,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH (Unlocks)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={statusPath} onChange={e => setStatusPath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setStatusPath)}>📁</button>
@@ -159,12 +147,11 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
             {achievements.length > 0 && (
                 <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '5px', maxHeight: '150px', overflowY: 'auto' }}>
-                        {achievements.map(a => (
-                            <div key={a.name} style={{ fontSize: '10px', color: a.unlocked ? '#4caf50' : '#666', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                                {a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}
-                            </div>
-                        ))}
+                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>
+                        {achievements.filter(a=>a.unlocked).length} / {achievements.length} Achievements
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px', maxHeight: '250px', overflowY: 'auto', paddingRight: '5px' }}>
+                        {achievements.map(a => <AchievementItem key={a.name} a={a} />)}
                     </div>
                 </div>
             )}
@@ -178,12 +165,12 @@ const showGSEConfig = (appId: string, doc: Document) => {
     const rd = getGlobal('SP_REACTDOM');
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
-        else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
+        else if ((modalRoot as any)._root) (modalRoot as any)._root.unmount();
         modalRoot.remove();
     };
     const element = (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }} onClick={onClose}>
-            <div style={{ width: '500px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: '600px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
                 <GSEGameSettings appId={appId} />
                 <div style={{ padding: '10px', textAlign: 'right', borderTop: '1px solid #333' }}>
                     <button style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer' }} onClick={onClose}>Close</button>
@@ -222,7 +209,7 @@ const processInjection = async (doc: Document) => {
     if (!appId) return;
 
     if (appId !== lastAppId) {
-        log("Game Page Detect:", appId);
+        log("Game Page:", appId);
         lastAppId = appId;
     }
 
@@ -255,6 +242,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE active.</div>,
+        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
     };
 });
