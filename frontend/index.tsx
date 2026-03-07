@@ -267,35 +267,72 @@ const injectGameDetails = () => {
 };
 
 const injectIntoGeneral = () => {
-    // Try to find the General page container
-    const generalPage = document.querySelector('[class*="gameproperties_GeneralPage"]');
+    // Broad search for anything that looks like the General properties page
+    const generalPage = document.querySelector('[class*="GeneralPage"]') || 
+                        document.querySelector('[class*="gameproperties_GeneralPage"]');
+
     if (generalPage && !generalPage.querySelector('.gse-general-injected')) {
-        console.log("GSE: Found General page, injecting...");
+        console.log("GSE: Found General page, attempting injection...");
         
-        const appIdMatch = window.location.href.match(/appid=(\d+)/) || window.location.href.match(/\/app\/(\d+)/);
-        const appId = appIdMatch ? appIdMatch[1] : (window as any).opener?.location.href.match(/\/app\/(\d+)/)?.[1];
+        // Try multiple ways to get the AppID
+        let appId: string | null = null;
+        
+        // 1. From URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        appId = urlParams.get('appid') || urlParams.get('appId');
+        
+        // 2. From URL path
+        if (!appId) {
+            const pathMatch = window.location.href.match(/\/app\/(\d+)/) || window.location.href.match(/appid\/(\d+)/);
+            appId = pathMatch ? pathMatch[1] : null;
+        }
+        
+        // 3. From opener window (if this is a popup)
+        if (!appId && (window as any).opener) {
+            try {
+                const openerUrl = (window as any).opener.location.href;
+                const openerMatch = openerUrl.match(/\/app\/(\d+)/);
+                appId = openerMatch ? openerMatch[1] : null;
+            } catch (e) {}
+        }
+
+        console.log("GSE: Detected AppID:", appId);
 
         if (appId) {
             const injectDiv = document.createElement('div');
             injectDiv.className = 'gse-general-injected';
             injectDiv.style.marginTop = '20px';
-            injectDiv.style.borderTop = '1px solid rgba(255,255,255,0.1)';
-            injectDiv.style.paddingTop = '20px';
+            injectDiv.style.marginBottom = '20px';
+            injectDiv.style.padding = '15px';
+            injectDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+            injectDiv.style.borderRadius = '4px';
+            injectDiv.style.border = '1px solid rgba(255, 255, 255, 0.1)';
             
-            // Find a good spot to insert - usually after the first few sections
-            const sections = generalPage.querySelectorAll('[class*="gameproperties_Section"]');
+            // Try to find a section to insert after, or just prepend to the top for visibility
+            const sections = generalPage.querySelectorAll('[class*="Section"]') || 
+                             generalPage.querySelectorAll('[class*="gameproperties_Section"]');
+            
             if (sections.length > 0) {
+                // Insert after the first section (usually "Updates" or "General")
                 sections[0].parentNode?.insertBefore(injectDiv, sections[0].nextSibling);
             } else {
-                generalPage.appendChild(injectDiv);
+                // Fallback to top if no sections found
+                generalPage.prepend(injectDiv);
             }
 
             const ReactDOM = (window as any).ReactDOM;
-            if (ReactDOM?.createRoot) {
-                ReactDOM.createRoot(injectDiv).render(<GSEGameSettings appId={appId} />);
-            } else if (ReactDOM?.render) {
-                ReactDOM.render(<GSEGameSettings appId={appId} />, injectDiv);
+            try {
+                if (ReactDOM?.createRoot) {
+                    ReactDOM.createRoot(injectDiv).render(<GSEGameSettings appId={appId} />);
+                } else if (ReactDOM?.render) {
+                    ReactDOM.render(<GSEGameSettings appId={appId} />, injectDiv);
+                }
+                console.log("GSE: Injection successful");
+            } catch (e) {
+                console.error("GSE: Render failed", e);
             }
+        } else {
+            console.warn("GSE: Could not determine AppID for injection");
         }
     }
 };
@@ -390,13 +427,16 @@ export default definePlugin(() => {
         if (window.location.href.includes('/library/app/')) {
             injectGameDetails();
         }
-        if (document.querySelector('[class*="pagedsettings_PagedSettingsSideBar"]') || 
-            document.querySelector('[class*="PagedSettingsSideBar"]')) {
-            injectGameProperties();
-        }
+        
         // Always try injecting into General if visible
         injectIntoGeneral();
-    }, 2000);
+        
+        // Also check for the properties window
+        if (document.querySelector('[class*="PagedSettingsSideBar"]') || 
+            document.querySelector('[class*="pagedsettings_PagedSettingsSideBar"]')) {
+            injectGameProperties();
+        }
+    }, 500);
 
     return {
         title: "GSE Achievements",
