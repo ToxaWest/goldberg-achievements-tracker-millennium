@@ -193,24 +193,25 @@ const showGSEConfig = (appId: string, doc: Document) => {
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
     
-    // 1. Try URL/Path of THIS specific document first (most local and reliable)
-    const localPath = doc.location.pathname || "";
-    let id = localPath.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
-    if (id) return id;
+    // 1. Path check (Reliable for BPM Popups)
+    let id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
+    if (id) { log("ID from URL:", id); return id; }
 
-    // 2. Try images in THIS document (HLTB style - very reliable for current render)
-    const imgs = Array.from(doc.querySelectorAll('img'));
-    for (const img of imgs) {
-        const src = img.src || img.getAttribute('src') || "";
-        const match = src.match(/\/assets\/(\d+)/) || src.match(/\/app\/(\d+)/);
-        if (match) return match[1];
-    }
-
-    // 3. Check local window's MainWindowBrowserManager
-    const manager = win.MainWindowBrowserManager;
+    // 2. Manager check (Reliable for Desktop Library)
+    // We prioritize window.top as it tracks the main library route in Desktop
+    const manager = (window.top as any)?.MainWindowBrowserManager || win.MainWindowBrowserManager;
     id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    if (id) { log("ID from Manager:", id); return id; }
+
+    // 3. Hero Image (Reliable fallback for any game page)
+    const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"], img[src*="library_hero"], img[src*="/assets/"]') as HTMLImageElement;
+    if (hero) {
+        const src = hero.src || hero.getAttribute('src') || "";
+        const match = src.match(/\/assets\/(\d+)/) || src.match(/\/app\/(\d+)/);
+        if (match) { log("ID from Hero Image:", match[1]); return match[1]; }
+    }
     
-    return id || null;
+    return null;
 };
 
 // --- Core Logic ---
@@ -223,14 +224,13 @@ const processInjection = async (doc: Document) => {
 
     const appId = getAppId(doc);
     
-    // If no AppID, cleanup and exit
     if (!appId) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) { existing.remove(); injectedIds.delete(doc); }
         return;
     }
 
-    // BPM Tab Validation (WhatsNew)
+    // BPM Tab Validation
     if (isBPM) {
         const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
                          doc.getElementById('«rod»WhatsNew_Content') ||
@@ -245,7 +245,7 @@ const processInjection = async (doc: Document) => {
 
     // Handle game switch per document
     if (appId !== injectedIds.get(doc)) {
-        log(`New game detected: ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
+        log(`Injecting for ${appId} (Mode: ${isBPM ? 'BPM' : 'Desktop'})`);
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) existing.remove();
         injectedIds.set(doc, appId);
