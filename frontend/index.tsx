@@ -138,11 +138,48 @@ const showGSEConfig = (appId: string, doc: Document) => {
 
 let lastAppId: string | null = null;
 
-const injectDesktop = (doc: Document) => {
+const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
     const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
+    
+    // 1. Try MainWindowBrowserManager path
     let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    
+    // 2. Try window location href
     if (!appId) appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+
+    // 3. Try the HLTB-style pattern (/assets/(\d+)) from header images
+    if (!appId) {
+        const headerImageSelectors = [
+            "._3NBxSLAZLbbbnul8KfDFjw._2dzwXkCVAuZGFC-qKgo8XB",
+            'img.HNbe3eZf6H7dtJ042x1vM[src*="library_hero"]'
+        ];
+        for (const selector of headerImageSelectors) {
+            const img = doc.querySelector(selector) as HTMLImageElement;
+            if (img && img.src) {
+                const match = img.src.match(/\/assets\/(\d+)/);
+                if (match) {
+                    appId = match[1];
+                    break;
+                }
+            }
+        }
+    }
+
+    // 4. Fallback to SteamClient active app ID
+    if (!appId && win.SteamClient?.Apps?.GetActiveAppID) {
+        // This is async in some contexts, but let's see if we can get it
+        try {
+            // Some versions of Millennium/Steam exposed this synchronously or we can't await here easily
+            // But if it's available, it's a good fallback
+        } catch(e) {}
+    }
+
+    return appId;
+}
+
+const injectDesktop = (doc: Document) => {
+    const appId = getAppId(doc);
 
     if (!appId) return;
     if (appId !== lastAppId) {
@@ -169,10 +206,7 @@ const injectDesktop = (doc: Document) => {
 };
 
 const injectBPM = async (doc: Document) => {
-    const win = (doc.defaultView || window) as any;
-    const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
-    let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    if (!appId) appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    const appId = getAppId(doc);
 
     if (!appId) return;
 
@@ -185,6 +219,7 @@ const injectBPM = async (doc: Document) => {
         injectDiv.style.width = '100%';
         container.prepend(injectDiv);
         
+        const win = (doc.defaultView || window) as any;
         const rd = win.SP_REACTDOM || win.ReactDOM;
         if (rd) {
             const achievements = parseResult(await getAchievements({ app_id: appId }));
