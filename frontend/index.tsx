@@ -16,7 +16,7 @@ const parseResult = (res: any) => {
     return res;
 };
 
-const AchievementItem = ({ a, config }: { a: any, config: any }) => {
+const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM?: boolean }) => {
     const [iconData, setIconData] = React.useState<string | null>(null);
 
     React.useEffect(() => {
@@ -29,17 +29,25 @@ const AchievementItem = ({ a, config }: { a: any, config: any }) => {
         }
     }, [a.icon_path, config.interface_path]);
 
+    const iconSize = isBPM ? '48px' : '32px';
+    const fontSize = isBPM ? '14px' : '12px';
+
     return (
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
-            <div style={{ width: '32px', height: '32px', background: '#222', flexShrink: 0, borderRadius: '3px', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: isBPM ? '12px' : '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+            <div style={{ width: iconSize, height: iconSize, background: '#222', flexShrink: 0, borderRadius: '3px', overflow: 'hidden' }}>
                 {iconData ? <img src={iconData} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: a.unlocked ? 1 : 0.2 }} /> : null}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '12px', fontWeight: 'bold', color: a.unlocked ? '#fff' : '#777', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: fontSize, fontWeight: 'bold', color: a.unlocked ? '#fff' : '#777', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {a.display_name}
                 </div>
+                {isBPM && a.description && (
+                    <div style={{ fontSize: '11px', color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '2px' }}>
+                        {a.description}
+                    </div>
+                )}
             </div>
-            {a.unlocked && <div style={{ color: '#4caf50', fontSize: '12px' }}>✓</div>}
+            {a.unlocked && <div style={{ color: '#4caf50', fontSize: isBPM ? '16px' : '12px' }}>✓</div>}
         </div>
     );
 };
@@ -77,6 +85,8 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     if (isLoading) return <div style={{padding: '20px', color: '#888'}}>Syncing...</div>;
 
+    const unlockedCount = achievements.filter(a => a.unlocked).length;
+
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
             <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
@@ -99,6 +109,10 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
             {achievements.length > 0 && (
                 <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+                    <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                         <span style={{ fontSize: '12px', color: '#888', fontWeight: 'bold' }}>ACHIEVEMENTS</span>
+                         <span style={{ fontSize: '12px', color: '#fff' }}>Earned {unlockedCount} of {achievements.length}</span>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxHeight: '250px', overflowY: 'auto' }}>
                         {achievements.map(a => <AchievementItem key={a.name} a={a} config={config} />)}
                     </div>
@@ -138,7 +152,6 @@ const showGSEConfig = (appId: string, doc: Document) => {
 
 let lastDesktopAppId: string | null = null;
 let lastBPMAppId: string | null = null;
-let lastBPMPath: string | null = null;
 
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
@@ -202,37 +215,25 @@ const injectDesktop = (doc: Document) => {
 };
 
 const injectBPM = async (doc: Document) => {
-    const win = (doc.defaultView || window) as any;
-    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
-    const currentPath = manager?.m_lastLocation?.pathname || doc.location.pathname || "";
-    
     const appId = getAppId(doc);
     if (!appId) return;
 
-    // Check if we are on the "What's New" tab (default game page in BPM)
-    // The path is usually like /routes/library/app/{appid}/tab/WhatsNew
-    const isWhatsNew = currentPath.includes("/tab/WhatsNew") || 
-                       (currentPath.includes("/app/" + appId) && !currentPath.includes("/tab/"));
-
-    if (!isWhatsNew) {
-        // Remove existing injection if we moved away from the correct tab
+    const whatsNewContent = doc.getElementById('«rs7»WhatsNew_Content');
+    if (!whatsNewContent) {
         const existing = doc.querySelector('.gse-bpm-injected');
         if (existing) {
-            log("Not on WhatsNew tab, removing injection.");
+            log("WhatsNew_Content not found, removing injection.");
             existing.remove();
             lastBPMAppId = null;
-            lastBPMPath = null;
         }
         return;
     }
 
-    // If game changed or path changed, we might need to re-inject
-    if (appId !== lastBPMAppId || currentPath !== lastBPMPath) {
-        log("BPM Game or Path changed:", appId, currentPath);
+    if (appId !== lastBPMAppId) {
+        log("BPM Game changed:", appId);
         const existing = doc.querySelector('.gse-bpm-injected');
         if (existing) existing.remove();
         lastBPMAppId = appId;
-        lastBPMPath = currentPath;
     }
 
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
@@ -241,6 +242,7 @@ const injectBPM = async (doc: Document) => {
     if (container && !container.querySelector('.gse-bpm-injected')) {
         log("BPM target container found, attempting injection for AppID:", appId);
         
+        const win = (doc.defaultView || window) as any;
         const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
         if (!rd) return;
 
@@ -252,14 +254,19 @@ const injectBPM = async (doc: Document) => {
         const achievements = parseResult(await getAchievements({ app_id: appId }));
         const config = parseResult(await getGameConfig({ app_id: appId }));
         
+        const unlockedCount = achievements.filter((a: any) => a.unlocked).length;
+
         const element = (
             <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '24px', marginBottom: '15px' }}>GSE Achievements</h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '15px' }}>
+                    <h2 style={{ fontSize: '24px', margin: 0 }}>GSE Achievements</h2>
+                    <span style={{ fontSize: '16px', color: '#888' }}>Earned {unlockedCount} of {achievements.length}</span>
+                </div>
                 {(!config || !config.interface_path) ? (
                     <div style={{ color: '#888' }}>Please configure achievement paths in Desktop Mode.</div>
                 ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
-                        {achievements.map((a: any) => <AchievementItem key={a.name} a={a} config={config} />)}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
+                        {achievements.map((a: any) => <AchievementItem key={a.name} a={a} config={config} isBPM={true} />)}
                     </div>
                 )}
             </div>
