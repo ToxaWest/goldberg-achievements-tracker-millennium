@@ -136,7 +136,8 @@ const showGSEConfig = (appId: string, doc: Document) => {
     }
 };
 
-let lastAppId: string | null = null;
+let lastDesktopAppId: string | null = null;
+let lastBPMAppId: string | null = null;
 
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
@@ -144,11 +145,11 @@ const getAppId = (doc: Document) => {
     
     // 1. Try MainWindowBrowserManager path
     let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    if (appId) { log("Detected AppID from Manager:", appId); return appId; }
+    if (appId) return appId;
     
     // 2. Try window location href
     appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
-    if (appId) { log("Detected AppID from Location href:", appId); return appId; }
+    if (appId) return appId;
 
     // 3. Try the HLTB-style pattern (/assets/(\d+)) from header images
     const headerImageSelectors = [
@@ -159,23 +160,15 @@ const getAppId = (doc: Document) => {
         const img = doc.querySelector(selector) as HTMLImageElement;
         if (img && img.src) {
             const match = img.src.match(/\/assets\/(\d+)/);
-            if (match) {
-                appId = match[1];
-                log("Detected AppID from Header Image (" + selector + "):", appId);
-                return appId;
-            }
+            if (match) return match[1];
         }
     }
 
-    // 4. Fallback search in all images for any /assets/ pattern
+    // 4. Fallback search in all images
     const allImgs = Array.from(doc.querySelectorAll('img'));
     for (const img of allImgs) {
-        const match = img.src.match(/\/assets\/(\d+)/);
-        if (match) {
-            appId = match[1];
-            log("Detected AppID from general image match:", appId);
-            return appId;
-        }
+        const match = (img.src || "").match(/\/assets\/(\d+)/);
+        if (match) return match[1];
     }
 
     return null;
@@ -185,13 +178,15 @@ const injectDesktop = (doc: Document) => {
     const appId = getAppId(doc);
     if (!appId) return;
 
-    if (appId !== lastAppId) {
-        log("Injecting Desktop for AppID:", appId);
-        lastAppId = appId;
+    if (appId !== lastDesktopAppId) {
+        log("injectDesktop triggered for AppID:", appId);
+        lastDesktopAppId = appId;
     }
 
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
-    if (!linksBar) return;
+    if (!linksBar) {
+        return;
+    }
 
     let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
     if (btn) return;
@@ -200,7 +195,7 @@ const injectDesktop = (doc: Document) => {
     const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
     
     if (lastSteamBtn) {
-        log("Found last button for positioning, injecting GSE button.");
+        log("Desktop linksBar found, injecting button for AppID:", appId);
         btn = doc.createElement('div');
         btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
         btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
@@ -214,11 +209,16 @@ const injectBPM = async (doc: Document) => {
     const appId = getAppId(doc);
     if (!appId) return;
 
+    if (appId !== lastBPMAppId) {
+        log("injectBPM triggered for AppID:", appId);
+        lastBPMAppId = appId;
+    }
+
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
     if (container && !container.querySelector('.gse-bpm-injected')) {
-        log("Injecting BPM for AppID:", appId);
+        log("BPM container found, attempting injection for AppID:", appId);
         const injectDiv = doc.createElement('div');
         injectDiv.className = 'gse-bpm-injected';
         injectDiv.style.width = '100%';
@@ -226,26 +226,32 @@ const injectBPM = async (doc: Document) => {
         
         const win = (doc.defaultView || window) as any;
         const rd = win.SP_REACTDOM || win.ReactDOM;
-        if (rd) {
-            const achievements = parseResult(await getAchievements({ app_id: appId }));
-            const config = parseResult(await getGameConfig({ app_id: appId }));
-            
-            const element = (
-                <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px' }}>
-                    <h2 style={{ fontSize: '24px', marginBottom: '15px' }}>GSE Achievements</h2>
-                    {(!config || !config.interface_path) ? (
-                        <div style={{ color: '#888' }}>Please configure achievement paths in Desktop Mode.</div>
-                    ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
-                            {achievements.map((a: any) => <AchievementItem key={a.name} a={a} config={config} />)}
-                        </div>
-                    )}
-                </div>
-            );
-            
-            if (rd.createRoot) rd.createRoot(injectDiv).render(element);
-            else rd.render(element, injectDiv);
+        
+        if (!rd) {
+            log("BPM Error: React/ReactDOM not found in window");
+            return;
         }
+
+        const achievements = parseResult(await getAchievements({ app_id: appId }));
+        const config = parseResult(await getGameConfig({ app_id: appId }));
+        
+        log("BPM: Fetched data, rendering achievements...");
+        const element = (
+            <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px' }}>
+                <h2 style={{ fontSize: '24px', marginBottom: '15px' }}>GSE Achievements</h2>
+                {(!config || !config.interface_path) ? (
+                    <div style={{ color: '#888' }}>Please configure achievement paths in Desktop Mode.</div>
+                ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
+                        {achievements.map((a: any) => <AchievementItem key={a.name} a={a} config={config} />)}
+                    </div>
+                )}
+            </div>
+        );
+        
+        if (rd.createRoot) rd.createRoot(injectDiv).render(element);
+        else rd.render(element, injectDiv);
+        log("BPM injection complete.");
     }
 };
 
@@ -260,21 +266,25 @@ export default definePlugin(() => {
     // 2. Hook for Big Picture Mode and other popups
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
         const name = context.m_strName || "Unknown";
-        log("Window Created:", name);
+        const doc = context.m_popup?.document;
+        if (!doc?.body) return;
+
+        log("Window Created hook triggered for:", name);
 
         const isBPM = name.startsWith("SP ");
         const isSteam = name === "Steam";
         
-        if (!isBPM && !isSteam) return;
+        // We observe everything that might be a game page
+        const observer = new MutationObserver(() => {
+            // We try both because some windows are misidentified or hybrid
+            injectDesktop(doc);
+            injectBPM(doc);
+        });
         
-        const doc = context.m_popup?.document;
-        if (!doc?.body) return;
-
-        const observer = new MutationObserver(() => isBPM ? injectBPM(doc) : injectDesktop(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
         
-        if (isBPM) injectBPM(doc);
-        else injectDesktop(doc);
+        injectDesktop(doc);
+        injectBPM(doc);
     });
 
     return { title: "GSE Achievements", icon: <IconsModule.Settings />, content: <div style={{padding: '20px'}}>GSE active.</div> };
