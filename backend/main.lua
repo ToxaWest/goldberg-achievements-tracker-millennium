@@ -67,13 +67,14 @@ local function check_achievements()
     end
 end
 
--- Exposed Methods
-local function get_game_config(payload)
+-- Exposed Methods (Returning JSON strings to match HLTB style)
+function get_game_config(payload)
     print("GSE: get_game_config for " .. tostring(payload.app_id))
-    return configs[tostring(payload.app_id)] or {}
+    local cfg = configs[tostring(payload.app_id)] or {}
+    return json.encode(cfg)
 end
 
-local function save_game_config(payload)
+function save_game_config(payload)
     local app_id = tostring(payload.app_id)
     print("GSE: save_game_config for " .. app_id)
     configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
@@ -81,14 +82,14 @@ local function save_game_config(payload)
     
     local status = safe_decode(safe_read_file(payload.status_path))
     if status then last_status_map[app_id] = status end
-    return { success = success }
+    return json.encode({ success = success })
 end
 
-local function get_achievements(payload)
+function get_achievements(payload)
     local app_id = tostring(payload.app_id)
     print("GSE: get_achievements for " .. app_id)
     local config = configs[app_id]
-    if not config then return {} end
+    if not config then return json.encode({}) end
     
     local meta = safe_decode(safe_read_file(config.interface_path)) or {}
     local status = safe_decode(safe_read_file(config.status_path)) or {}
@@ -98,11 +99,11 @@ local function get_achievements(payload)
         ach.unlocked = ach_status.unlocked or false
         ach.unlock_time = ach_status.unlock_time or 0
     end
-    return meta
+    return json.encode(meta)
 end
 
-local function get_all_configs()
-    return configs
+function get_all_configs()
+    return json.encode(configs)
 end
 
 -- Lifecycle

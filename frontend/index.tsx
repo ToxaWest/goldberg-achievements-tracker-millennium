@@ -3,29 +3,25 @@ import React from 'react';
 
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
+let lastAppId: string | null = null;
+
 /**
- * Hyper-robust Global Finder
- * Searches current window, parents, openers, and the Main Window Manager
+ * Robust global discovery
  */
 const getGlobal = (name: string): any => {
     const win = window as any;
     if (win[name]) return win[name];
-    
-    // Try hierarchy
     try {
         if (win.opener && win.opener[name]) return win.opener[name];
         if (win.parent && win.parent[name]) return win.parent[name];
     } catch (e) {}
 
-    // Try MainWindowBrowserManager (The core of Steam UI)
     const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager || win.parent?.MainWindowBrowserManager;
     if (manager) {
         if (manager[name]) return manager[name];
         if (manager.m_browser && manager.m_browser[name]) return manager.m_browser[name];
-        // Try the manager's window context
         if (manager.m_browser?.window && manager.m_browser.window[name]) return manager.m_browser.window[name];
     }
-
     return null;
 };
 
@@ -38,7 +34,17 @@ const callBackend = async (method: string, args: any) => {
     try {
         log(`Calling ${method}...`);
         const res = await m.callServerMethod("goldberg-achievements", method, args);
-        log(`Response from ${method}:`, res);
+        log(`Raw response from ${method}:`, res);
+        
+        // Match HLTB style: Parse JSON from Lua
+        if (typeof res === 'string') {
+            try {
+                return JSON.parse(res);
+            } catch (e) {
+                log(`Failed to parse response from ${method}:`, e);
+                return res;
+            }
+        }
         return res;
     } catch (e) {
         log(`Error calling ${method}:`, e);
@@ -51,7 +57,7 @@ const notify = (title: string, message: string) => {
     if (sc?.Notifications?.DisplayNotification) {
         sc.Notifications.DisplayNotification(title, message, "", "");
     } else {
-        log("NOTIFY FALLBACK:", title, message);
+        log("NOTIFY:", title, message);
     }
 };
 
@@ -63,26 +69,33 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     React.useEffect(() => {
         const load = async () => {
-            const config = await callBackend('get_game_config', { app_id: appId });
-            if (config) {
-                setInterfacePath(config.interface_path || '');
-                setStatusPath(config.status_path || '');
+            try {
+                const config = await callBackend('get_game_config', { app_id: appId });
+                if (config) {
+                    setInterfacePath(config.interface_path || '');
+                    setStatusPath(config.status_path || '');
+                }
+                const data = await callBackend('get_achievements', { app_id: appId });
+                setAchievements(Array.isArray(data) ? data : []);
+            } catch (e) {
+                log("Load error:", e);
+            } finally {
+                setIsLoading(false);
             }
-            const data = await callBackend('get_achievements', { app_id: appId });
-            setAchievements(data || []);
-            setIsLoading(false);
         };
         load();
     }, [appId]);
 
     const handleBrowse = async (setter: (val: string) => void) => {
         const sc = getGlobal('SteamClient');
-        // File picker is usually in SteamClient.Window
-        const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker;
+        // Check multiple possible locations for OpenFilePicker
+        const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || (window as any).SteamClient?.Window?.OpenFilePicker;
         
         if (!picker) {
-            log("OpenFilePicker not found. SteamClient keys:", Object.keys(sc || {}));
-            notify("GSE Error", "File picker not available in this window.");
+            log("OpenFilePicker not found. Checking all globals...");
+            const allSc = getGlobal('SteamClient');
+            log("SteamClient available keys:", Object.keys(allSc || {}));
+            notify("GSE Error", "File picker not found in this window.");
             return;
         }
 
@@ -110,8 +123,9 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
         if (res && res.success) {
             notify("GSE Achievements", "Settings saved successfully!");
             const data = await callBackend('get_achievements', { app_id: appId });
-            setAchievements(data || []);
+            setAchievements(Array.isArray(data) ? data : []);
         } else {
+            log("Save Failed. Response:", res);
             notify("GSE Error", "Backend failed to save settings.");
         }
     };
@@ -161,7 +175,7 @@ const showGSEConfig = (appId: string, doc: Document) => {
     const rd = getGlobal('SP_REACTDOM');
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
-        else if ((modalRoot as any)._root) (modalRoot as any)._root.unmount();
+        else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
         modalRoot.remove();
     };
     const element = (
@@ -175,8 +189,8 @@ const showGSEConfig = (appId: string, doc: Document) => {
         </div>
     );
     if (rd?.createRoot) {
-        if (!(modalRoot as any)._root) (modalRoot as any)._root = rd.createRoot(modalRoot);
-        (modalRoot as any)._root.render(element);
+        if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
+        (modalRoot as any)._gseRoot.render(element);
     } else if (rd?.render) {
         rd.render(element, modalRoot);
     }
@@ -193,7 +207,20 @@ const processInjection = async (doc: Document) => {
         const match = doc.location.href.match(/\/app\/(\d+)/) || doc.location.href.match(/appid=(\d+)/);
         if (match) appId = match[1];
     }
+    if (!appId) {
+        // HLTB style: Search images
+        const images = doc.querySelectorAll('img[src*="/assets/"]');
+        for (const img of Array.from(images) as HTMLImageElement[]) {
+            const match = img.src.match(/\/assets\/(\d+)/);
+            if (match) { appId = match[1]; break; }
+        }
+    }
     if (!appId) return;
+
+    if (appId !== lastAppId) {
+        log("Game Page:", appId);
+        lastAppId = appId;
+    }
 
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
     if (linksBar && !linksBar.querySelector('.gse-details-button')) {
