@@ -136,10 +136,48 @@ const showGSEConfig = (appId: string, doc: Document) => {
     }
 };
 
-const injectBPM = async (doc: Document, appId: string) => {
+let lastAppId: string | null = null;
+
+const injectDesktop = (doc: Document) => {
+    const win = (doc.defaultView || window) as any;
+    const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
+    let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    if (!appId) appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+
+    if (!appId) return;
+    if (appId !== lastAppId) {
+        log("Desktop Game Page:", appId);
+        lastAppId = appId;
+    }
+
+    const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
+    if (linksBar) {
+        let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
+        const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
+        const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
+        if (lastSteamBtn) {
+            if (!btn) {
+                btn = doc.createElement('div');
+                btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
+                btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
+                linksBar.appendChild(btn);
+            }
+            btn.style.cssText = `left: ${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px; top: 0px; position: absolute;`;
+            btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId!, doc); };
+        }
+    }
+};
+
+const injectBPM = async (doc: Document) => {
+    const win = (doc.defaultView || window) as any;
+    const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
+    let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    if (!appId) appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+
+    if (!appId) return;
+
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
-                      doc.querySelector('[class*="gamepaddetails_ControlsContainer"]') ||
-                      doc.querySelector('[class*="gamepaddetails_GameDetailsControls"]');
+                      doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
     if (container && !container.querySelector('.gse-bpm-injected')) {
         const injectDiv = doc.createElement('div');
@@ -147,30 +185,21 @@ const injectBPM = async (doc: Document, appId: string) => {
         injectDiv.style.width = '100%';
         container.prepend(injectDiv);
         
-        const win = (doc.defaultView || window) as any;
         const rd = win.SP_REACTDOM || win.ReactDOM;
         if (rd) {
             const achievements = parseResult(await getAchievements({ app_id: appId }));
             const config = parseResult(await getGameConfig({ app_id: appId }));
             
-            if (!config || !config.interface_path) {
-                const element = (
-                    <div style={{ padding: '20px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', marginBottom: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                        <h2 style={{ fontSize: '20px', color: '#888' }}>GSE Achievements</h2>
-                        <div style={{ color: '#555', fontSize: '14px' }}>Please configure achievement paths in Desktop Mode first.</div>
-                    </div>
-                );
-                if (rd.createRoot) rd.createRoot(injectDiv).render(element);
-                else rd.render(element, injectDiv);
-                return;
-            }
-
             const element = (
                 <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px' }}>
                     <h2 style={{ fontSize: '24px', marginBottom: '15px' }}>GSE Achievements</h2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
-                        {achievements.map((a: any) => <AchievementItem key={a.name} a={a} config={config} />)}
-                    </div>
+                    {(!config || !config.interface_path) ? (
+                        <div style={{ color: '#888' }}>Please configure achievement paths in Desktop Mode.</div>
+                    ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
+                            {achievements.map((a: any) => <AchievementItem key={a.name} a={a} config={config} />)}
+                        </div>
+                    )}
                 </div>
             );
             
@@ -180,75 +209,28 @@ const injectBPM = async (doc: Document, appId: string) => {
     }
 };
 
-let lastAppId: string | null = null;
-
-const processInjection = async (doc: Document) => {
-    const win = (doc.defaultView || window) as any;
-    const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
-    
-    let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    if (!appId) appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
-    if (!appId && win.SteamClient?.Apps?.GetAppID) {
-        try { appId = win.SteamClient.Apps.GetAppID()?.toString(); } catch (e) {}
-    }
-    
-    if (!appId) return;
-    if (appId !== lastAppId) {
-        log("Game Page:", appId);
-        lastAppId = appId;
-    }
-
-    // 1. Link Bar Injection (Desktop)
-    // .DgVQapkBmhAW6oPY5rPZo is a common class for the links bar, but we'll try to find it by structure too
-    const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo') || 
-                     Array.from(doc.querySelectorAll('div')).find(el => el.className.includes('DetailsCustomLinks'));
-    
-    if (linksBar) {
-        let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
-        if (!btn) {
-            const steamButtons = Array.from(linksBar.children).filter(c => (c as HTMLElement).style.left);
-            const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
-            
-            if (lastSteamBtn) {
-                btn = doc.createElement('div');
-                btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
-                btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
-                linksBar.appendChild(btn);
-                btn.style.cssText = `left: ${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px; top: 0px; position: absolute;`;
-                btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId!, doc); };
-            }
-        } else {
-            // Re-sync position if needed
-            const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
-            const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
-            if (lastSteamBtn) {
-                btn.style.left = `${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px`;
-            }
-        }
-    }
-
-    // 2. Big Picture Mode Injection
-    // Try multiple selectors for BPM game details container
-    const bpmContainer = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
-                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]') ||
-                       doc.querySelector('[class*="gamepaddetails_GameDetailsControls"]');
-    
-    if (bpmContainer && !bpmContainer.querySelector('.gse-bpm-injected')) {
-        injectBPM(doc, appId);
-    }
-};
-
 export default definePlugin(() => {
+    // 1. Hook for the main window (Desktop)
+    const desktopObserver = new MutationObserver(() => injectDesktop(document));
+    desktopObserver.observe(document.body, { childList: true, subtree: true });
+    injectDesktop(document);
+
+    // 2. Hook for Big Picture Mode and other popups
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
-        // Hook both Big Picture (SP) and Desktop (Steam) windows
-        if (!context.m_strName?.startsWith("SP ") && context.m_strName !== "Steam") return;
+        const isBPM = context.m_strName?.startsWith("SP ");
+        const isSteam = context.m_strName === "Steam";
+        
+        if (!isBPM && !isSteam) return;
         
         const doc = context.m_popup?.document;
         if (!doc?.body) return;
 
-        const observer = new MutationObserver(() => processInjection(doc));
+        const observer = new MutationObserver(() => isBPM ? injectBPM(doc) : injectDesktop(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
-        processInjection(doc);
+        
+        if (isBPM) injectBPM(doc);
+        else injectDesktop(doc);
     });
+
     return { title: "GSE Achievements", icon: <IconsModule.Settings />, content: <div style={{padding: '20px'}}>GSE active.</div> };
 });
