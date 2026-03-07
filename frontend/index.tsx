@@ -138,20 +138,18 @@ const showGSEConfig = (appId: string, doc: Document) => {
 
 let lastDesktopAppId: string | null = null;
 let lastBPMAppId: string | null = null;
+let lastBPMPath: string | null = null;
 
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
     const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
     
-    // 1. Try MainWindowBrowserManager path
     let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     if (appId) return appId;
     
-    // 2. Try window location href
     appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
     if (appId) return appId;
 
-    // 3. Try the HLTB-style pattern (/assets/(\d+)) from header images
     const headerImageSelectors = [
         "._3NBxSLAZLbbbnul8KfDFjw._2dzwXkCVAuZGFC-qKgo8XB",
         'img.HNbe3eZf6H7dtJ042x1vM[src*="library_hero"]'
@@ -164,7 +162,6 @@ const getAppId = (doc: Document) => {
         }
     }
 
-    // 4. Fallback search in all images
     const allImgs = Array.from(doc.querySelectorAll('img'));
     for (const img of allImgs) {
         const match = (img.src || "").match(/\/assets\/(\d+)/);
@@ -200,35 +197,52 @@ const injectDesktop = (doc: Document) => {
             linksBar.appendChild(btn);
             btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
         }
-        // Always sync position
         btn.style.cssText = `left: ${leftPos}px; top: 0px; position: absolute;`;
     }
 };
 
 const injectBPM = async (doc: Document) => {
+    const win = (doc.defaultView || window) as any;
+    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
+    const currentPath = manager?.m_lastLocation?.pathname || doc.location.pathname || "";
+    
     const appId = getAppId(doc);
     if (!appId) return;
 
-    if (appId !== lastBPMAppId) {
-        log("injectBPM triggered for AppID:", appId);
+    // Check if we are on the "What's New" tab (default game page in BPM)
+    // The path is usually like /routes/library/app/{appid}/tab/WhatsNew
+    const isWhatsNew = currentPath.includes("/tab/WhatsNew") || 
+                       (currentPath.includes("/app/" + appId) && !currentPath.includes("/tab/"));
+
+    if (!isWhatsNew) {
+        // Remove existing injection if we moved away from the correct tab
+        const existing = doc.querySelector('.gse-bpm-injected');
+        if (existing) {
+            log("Not on WhatsNew tab, removing injection.");
+            existing.remove();
+            lastBPMAppId = null;
+            lastBPMPath = null;
+        }
+        return;
+    }
+
+    // If game changed or path changed, we might need to re-inject
+    if (appId !== lastBPMAppId || currentPath !== lastBPMPath) {
+        log("BPM Game or Path changed:", appId, currentPath);
+        const existing = doc.querySelector('.gse-bpm-injected');
+        if (existing) existing.remove();
         lastBPMAppId = appId;
+        lastBPMPath = currentPath;
     }
 
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
     if (container && !container.querySelector('.gse-bpm-injected')) {
-        log("BPM container found, attempting injection for AppID:", appId);
+        log("BPM target container found, attempting injection for AppID:", appId);
         
-        const win = (doc.defaultView || window) as any;
-        const rd = win.SP_REACTDOM || win.ReactDOM || (window as any).SP_REACTDOM || (window as any).ReactDOM;
-        
-        if (!rd) {
-            // Silence this log if we already tried and failed to keep console clean, 
-            // but for now let's keep it to verify the fix.
-            log("BPM Error: React/ReactDOM not found in window. SP_REACTDOM:", !!win.SP_REACTDOM, "ReactDOM:", !!win.ReactDOM);
-            return;
-        }
+        const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
+        if (!rd) return;
 
         const injectDiv = doc.createElement('div');
         injectDiv.className = 'gse-bpm-injected';
@@ -238,7 +252,6 @@ const injectBPM = async (doc: Document) => {
         const achievements = parseResult(await getAchievements({ app_id: appId }));
         const config = parseResult(await getGameConfig({ app_id: appId }));
         
-        log("BPM: Fetched data, rendering achievements...");
         const element = (
             <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px' }}>
                 <h2 style={{ fontSize: '24px', marginBottom: '15px' }}>GSE Achievements</h2>
@@ -259,19 +272,17 @@ const injectBPM = async (doc: Document) => {
         } else {
             rd.render(element, injectDiv);
         }
-        log("BPM injection complete.");
+        log("BPM injection complete for:", appId);
     }
 };
 
 export default definePlugin(() => {
     log("GSE Plugin Initialized");
 
-    // 1. Hook for the main window (Desktop)
     const desktopObserver = new MutationObserver(() => injectDesktop(document));
     desktopObserver.observe(document.body, { childList: true, subtree: true });
     injectDesktop(document);
 
-    // 2. Hook for Big Picture Mode and other popups
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
         const name = context.m_strName || "Unknown";
         const doc = context.m_popup?.document;
