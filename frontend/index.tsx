@@ -9,16 +9,62 @@ const log = (...args: any[]) => console.log("[GSE]", ...args);
 
 let lastAppId: string | null = null;
 
+/**
+ * Safe notification helper for Steam
+ */
+const notify = (title: string, message: string) => {
+    try {
+        (window as any).SteamClient?.Notifications?.DisplayNotification(title, message, "", "");
+    } catch (e) {
+        log("Notification failed:", title, message);
+    }
+};
+
+/**
+ * Hyper-aggressive ReactDOM discovery
+ */
+const findReactDOM = (win: any): any => {
+    if (win.ReactDOM) return win.ReactDOM;
+    if (win.MainWindowBrowserManager?.m_ReactDOM) return win.MainWindowBrowserManager.m_ReactDOM;
+    if (win.Millennium?.ReactDOM) return win.Millennium.ReactDOM;
+    
+    try {
+        if (win.opener && win.opener !== win) {
+            const found = findReactDOM(win.opener);
+            if (found) return found;
+        }
+        if (win.parent && win.parent !== win) {
+            const found = findReactDOM(win.parent);
+            if (found) return found;
+        }
+    } catch (e) {}
+    
+    if (win !== window) return findReactDOM(window);
+    return null;
+};
+
 const getAppId = async (doc: Document): Promise<string | null> => {
     const win = (doc.defaultView || window) as any;
     const gWin = window as any;
+    
+    // Priority 1: MainWindowBrowserManager
     const manager = gWin.MainWindowBrowserManager || win.MainWindowBrowserManager;
     if (manager?.m_lastLocation?.pathname) {
         const match = manager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
         if (match) return match[1];
     }
+
+    // Priority 2: URL
     const match = win.location.href.match(/\/app\/(\d+)/) || win.location.href.match(/appid=(\d+)/);
     if (match) return match[1];
+
+    // Priority 3: Image Assets (HLTB style)
+    const images = doc.querySelectorAll('img[src*="/assets/"]');
+    for (const img of Array.from(images) as HTMLImageElement[]) {
+        const imgMatch = img.src.match(/\/assets\/(\d+)/);
+        if (imgMatch) return imgMatch[1];
+    }
+    
     return null;
 };
 
@@ -54,7 +100,9 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             interface_path: interfacePath.replace(/\\/g, '/').replace(/"/g, '').trim(), 
             status_path: statusPath.replace(/\\/g, '/').replace(/"/g, '').trim() 
         });
-        if (res?.success) alert("✅ Saved!");
+        if (res?.success) {
+            notify("GSE Achievements", `Saved settings for ${gameName}`);
+        }
     };
 
     return (
@@ -65,7 +113,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             <DialogButton onClick={handleSave} style={{ width: '100%', marginTop: '10px' }}>Save Settings</DialogButton>
             {achievements.length > 0 && (
                 <div style={{ marginTop: '15px', maxHeight: '150px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', padding: '10px' }}>
-                    {achievements.map(a => (<div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#666' }}>{a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}</div>))}
+                    {achievements.map(a => (<div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#888' }}>{a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}</div>))}
                 </div>
             )}
         </div>
@@ -73,16 +121,20 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 };
 
 const showGSEConfig = (appId: string, doc: Document) => {
-    log("Opening modal for:", appId);
-    const win = (doc.defaultView || window) as any;
-    const rd = win.ReactDOM || (window as any).ReactDOM;
-    if (!rd) return log("ReactDOM not found in window context");
+    const win = doc.defaultView || window;
+    const rd = findReactDOM(win);
+    
+    if (!rd) {
+        notify("GSE Error", "Could not find React renderer. See console.");
+        return;
+    }
 
     const modalRoot = doc.createElement('div');
     doc.body.appendChild(modalRoot);
     
     const onClose = () => {
         if (rd.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
+        else if ((modalRoot as any)._root) (modalRoot as any)._root.unmount();
         modalRoot.remove();
     };
 
@@ -108,7 +160,7 @@ const processInjection = async (doc: Document) => {
     if (!appId) return;
 
     if (appId !== lastAppId) {
-        log("Game Page:", appId);
+        log("Game Page Detected:", appId);
         lastAppId = appId;
     }
 
@@ -128,7 +180,6 @@ const processInjection = async (doc: Document) => {
             clickable.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                log("Button Clicked!");
                 showGSEConfig(appId, doc);
             });
         }
@@ -141,8 +192,7 @@ const processInjection = async (doc: Document) => {
     );
     if (generalTarget && !doc.querySelector('.gse-general-injected')) {
         const target = generalTarget.closest('[class*="Section"]') || generalTarget.parentElement;
-        const win = (doc.defaultView || window) as any;
-        const rd = win.ReactDOM || (window as any).ReactDOM;
+        const rd = findReactDOM(doc.defaultView || window);
         if (target && rd) {
             const injectDiv = doc.createElement('div');
             injectDiv.className = 'gse-general-injected';
