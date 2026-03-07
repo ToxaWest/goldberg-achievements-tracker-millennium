@@ -101,6 +101,10 @@ local function get_achievements(payload)
     return meta
 end
 
+local function get_all_configs()
+    return configs
+end
+
 -- Lifecycle
 local function on_load()
     print("GSE Achievements: Loading from " .. settings_path)
@@ -122,5 +126,6 @@ return {
     on_unload = function() print("GSE: Unloading") end,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
-    get_achievements = get_achievements
+    get_achievements = get_achievements,
+    get_all_configs = get_all_configs
 }
