@@ -34,41 +34,24 @@ end
 
 local function safe_decode(content)
     if not content then return nil end
+    if type(content) ~= "string" then return content end
     local status, result = pcall(json.decode, content)
     return status and result or nil
 end
 
--- Achievement Tracking
-local function check_achievements()
-    for app_id, config in pairs(configs) do
-        local status_path = config.status_path
-        local content = safe_read_file(status_path)
-        local current_status = safe_decode(content)
-        
-        if current_status then
-            local last_status = last_status_map[app_id] or {}
-            for ach_id, data in pairs(current_status) do
-                if data.unlocked and not (last_status[ach_id] and last_status[ach_id].unlocked) then
-                    print("GSE: New Achievement! " .. app_id .. ":" .. ach_id)
-                    
-                    local name = ach_id
-                    local meta = safe_decode(safe_read_file(config.interface_path))
-                    if meta then
-                        for _, a in ipairs(meta) do
-                            if a.name == ach_id then name = a.display_name or ach_id break end
-                        end
-                    end
-                    
-                    millennium.emit("achievement_earned", { app_id = app_id, name = name })
-                end
-            end
-            last_status_map[app_id] = current_status
-        end
+-- Robust Argument Normalization
+-- Some Millennium versions stringify the payload, others pass it as a table
+local function normalize_payload(payload)
+    if type(payload) == "string" then
+        local decoded = safe_decode(payload)
+        if type(decoded) == "table" then return decoded end
     end
+    return payload
 end
 
--- Global functions for Millennium to call
+-- Exposed Methods
 function get_game_config(payload)
+    payload = normalize_payload(payload)
     local app_id = tostring(type(payload) == "table" and (payload.app_id or payload[1]) or payload or "nil")
     print("GSE: get_game_config for " .. app_id)
     
@@ -77,15 +60,16 @@ function get_game_config(payload)
 end
 
 function save_game_config(payload)
+    payload = normalize_payload(payload)
     print("GSE: save_game_config called")
     
-    if type(payload) ~= "table" then 
-        print("GSE: Error - payload is " .. type(payload))
-        return json.encode({ success = false, error = "Invalid payload type" })
+    if type(payload) ~= "table" then
+        print("GSE: Error - payload still " .. type(payload))
+        return json.encode({ success = false, error = "Invalid payload type: " .. type(payload) })
     end
     
     local app_id = tostring(payload.app_id or "")
-    print("GSE: Saving AppID: " .. app_id)
+    print("GSE: Saving config for AppID: " .. app_id)
     
     if app_id == "" then 
         return json.encode({ success = false, error = "Missing AppID" }) 
@@ -106,6 +90,7 @@ function save_game_config(payload)
 end
 
 function get_achievements(payload)
+    payload = normalize_payload(payload)
     local app_id = tostring(type(payload) == "table" and (payload.app_id or payload[1]) or payload or "nil")
     print("GSE: get_achievements for " .. app_id)
     
@@ -117,19 +102,17 @@ function get_achievements(payload)
     
     local result = {}
     for _, ach in ipairs(meta) do
-        local ach_status = status[ach.name] or {}
-        table.insert(result, {
-            name = ach.name,
-            display_name = ach.display_name or ach.name,
-            unlocked = ach_status.unlocked or false,
-            unlock_time = ach_status.unlock_time or 0
-        })
+        if type(ach) == "table" and ach.name then
+            local ach_status = status[ach.name] or {}
+            table.insert(result, {
+                name = ach.name,
+                display_name = ach.display_name or ach.name,
+                unlocked = ach_status.unlocked or false,
+                unlock_time = ach_status.unlock_time or 0
+            })
+        end
     end
     return json.encode(result)
-end
-
-function get_all_configs()
-    return json.encode(configs)
 end
 
 -- Lifecycle
@@ -153,6 +136,5 @@ return {
     on_unload = function() print("GSE: Unloading") end,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
-    get_achievements = get_achievements,
-    get_all_configs = get_all_configs
+    get_achievements = get_achievements
 }

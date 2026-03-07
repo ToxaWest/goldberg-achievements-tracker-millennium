@@ -28,16 +28,17 @@ const callBackend = async (method: string, args: any) => {
     if (!m?.callServerMethod) return null;
     try {
         log(`Backend Call: ${method}`, args);
-        // Explicitly pass arguments as a single object
+        
+        // Match HLTB style: some environments need the payload to be stringified manually
         const res = await m.callServerMethod("goldberg-achievements", method, args);
         log(`Backend Raw Result (${method}):`, res);
         
-        if (typeof res === 'string') {
+        if (typeof res === 'string' && (res.startsWith('{') || res.startsWith('['))) {
             try { return JSON.parse(res); } catch (e) { return res; }
         }
         return res;
     } catch (e) {
-        log(`Backend Call Error (${method}):`, e);
+        log(`Backend Call Exception (${method}):`, e);
         return null;
     }
 };
@@ -80,7 +81,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
         
         if (typeof picker !== 'function') {
             log("OpenFilePicker not found. Context:", sc ? "SteamClient found" : "SteamClient missing");
-            alert("File picker not found. Please paste path manually.");
+            alert("File picker not available in this window. Please paste path manually.");
             return;
         }
 
@@ -111,7 +112,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             setAchievements(Array.isArray(data) ? data : []);
         } else {
             log("Backend reported failure:", res);
-            notify("GSE Error", "Failed to save settings. See console.");
+            notify("GSE Error", "Backend failed to save settings.");
         }
     };
 
@@ -184,7 +185,9 @@ const showGSEConfig = (appId: string, doc: Document) => {
 let lastAppId: string | null = null;
 
 const processInjection = async (doc: Document) => {
-    const manager = getGlobal('MainWindowBrowserManager');
+    const win = (doc.defaultView || window) as any;
+    const gWin = window as any;
+    const manager = gWin.MainWindowBrowserManager || win.MainWindowBrowserManager;
     let appId = null;
     if (manager?.m_lastLocation?.pathname) {
         const match = manager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
@@ -204,7 +207,7 @@ const processInjection = async (doc: Document) => {
     if (!appId) return;
 
     if (appId !== lastAppId) {
-        log("Found game page for appId:", appId);
+        log("Active AppID:", appId);
         lastAppId = appId;
     }
 
@@ -237,6 +240,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
+        content: <div style={{padding: '20px'}}>GSE active.</div>,
     };
 });
