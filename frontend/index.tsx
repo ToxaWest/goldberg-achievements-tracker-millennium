@@ -3,7 +3,7 @@ import React from 'react';
 
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
-// Direct backend helpers
+// --- Backend Callables ---
 const getGameConfig = callable<any, any>('get_game_config');
 const getAchievements = callable<any, any>('get_achievements');
 const saveGameConfig = callable<any, any>('save_game_config');
@@ -16,7 +16,9 @@ const parseResult = (res: any) => {
     return res;
 };
 
-const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM?: boolean }) => {
+// --- Components ---
+
+const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM: boolean }) => {
     const [iconData, setIconData] = React.useState<string | null>(null);
 
     React.useEffect(() => {
@@ -30,10 +32,14 @@ const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM?: bo
     }, [a.icon_path, config.interface_path]);
 
     const iconSize = isBPM ? '48px' : '32px';
-    const fontSize = isBPM ? '14px' : '12px';
+    const fontSize = isBPM ? '14px' : '11px';
 
     return (
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: isBPM ? '12px' : '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+        <div style={{ 
+            display: 'flex', gap: '8px', alignItems: 'center', 
+            padding: isBPM ? '10px' : '6px', 
+            background: 'rgba(0,0,0,0.2)', borderRadius: '4px' 
+        }}>
             <div style={{ width: iconSize, height: iconSize, background: '#222', flexShrink: 0, borderRadius: '3px', overflow: 'hidden' }}>
                 {iconData ? <img src={iconData} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: a.unlocked ? 1 : 0.2 }} /> : null}
             </div>
@@ -42,12 +48,12 @@ const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM?: bo
                     {a.display_name}
                 </div>
                 {isBPM && a.description && (
-                    <div style={{ fontSize: '11px', color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '2px' }}>
+                    <div style={{ fontSize: '11px', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {a.description}
                     </div>
                 )}
             </div>
-            {a.unlocked && <div style={{ color: '#4caf50', fontSize: isBPM ? '16px' : '12px' }}>✓</div>}
+            {a.unlocked && <div style={{ color: '#4caf50', fontSize: isBPM ? '14px' : '10px' }}>✓</div>}
         </div>
     );
 };
@@ -71,13 +77,11 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
         const sc = (window as any).SteamClient || (window as any).opener?.SteamClient;
         const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || sc?.OpenFilePicker;
         if (typeof picker !== 'function') return alert("Picker not found.");
-        
         try {
             const path = await picker("Select achievements.json", "", false);
             if (path) {
                 const normalized = path.replace(/\\/g, '/').replace(/"/g, '').trim();
-                const newCfg = { ...config, [field]: normalized, app_id: appId };
-                await saveGameConfig(newCfg);
+                await saveGameConfig({ ...config, [field]: normalized, app_id: appId });
                 loadData();
             }
         } catch (e) {}
@@ -85,56 +89,90 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     if (isLoading) return <div style={{padding: '20px', color: '#888'}}>Syncing...</div>;
 
-    const unlockedCount = achievements.filter(a => a.unlocked).length;
-
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
             <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
-            
-            <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <input disabled style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={config?.interface_path || ''} />
-                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse('interface_path')}>📁</button>
+            {['interface_path', 'status_path'].map(field => (
+                <div key={field} style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>{field.toUpperCase()}</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <input disabled style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={config?.[field] || ''} />
+                        <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(field)}>📁</button>
+                    </div>
                 </div>
+            ))}
+        </div>
+    );
+};
+
+const AchievementsView = ({ appId, isBPM, doc }: { appId: string, isBPM: boolean, doc: Document }) => {
+    const [config, setConfig] = React.useState<any>(null);
+    const [achievements, setAchievements] = React.useState<any[]>([]);
+
+    const load = async () => {
+        setConfig(parseResult(await getGameConfig({ app_id: appId })));
+        const data = parseResult(await getAchievements({ app_id: appId }));
+        setAchievements(Array.isArray(data) ? data : []);
+    };
+
+    React.useEffect(() => { load(); }, [appId]);
+
+    const unlockedCount = achievements.filter(a => a.unlocked).length;
+
+    return (
+        <div style={{ 
+            padding: isBPM ? '20px' : '15px', 
+            background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px',
+            border: isBPM ? 'none' : '1px solid rgba(255,255,255,0.05)'
+        }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <h2 style={{ fontSize: isBPM ? '24px' : '16px', margin: 0, color: '#eee' }}>GSE Achievements</h2>
+                    {!isBPM && (
+                        <button 
+                            onClick={() => showGSEConfig(appId, doc)}
+                            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '4px', color: '#888', padding: '2px 8px', fontSize: '10px', cursor: 'pointer' }}
+                        >Settings</button>
+                    )}
+                </div>
+                <span style={{ fontSize: isBPM ? '16px' : '12px', color: '#888' }}>
+                    Earned {unlockedCount} of {achievements.length}
+                </span>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH</label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <input disabled style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={config?.status_path || ''} />
-                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse('status_path')}>📁</button>
-                </div>
-            </div>
-
-            {achievements.length > 0 && (
-                <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
-                    <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                         <span style={{ fontSize: '12px', color: '#888', fontWeight: 'bold' }}>ACHIEVEMENTS</span>
-                         <span style={{ fontSize: '12px', color: '#fff' }}>Earned {unlockedCount} of {achievements.length}</span>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxHeight: '250px', overflowY: 'auto' }}>
-                        {achievements.map(a => <AchievementItem key={a.name} a={a} config={config} />)}
-                    </div>
+            {(!config || !config.interface_path) ? (
+                <div style={{ color: '#666', fontSize: '12px' }}>Please configure paths in settings.</div>
+            ) : (
+                <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: isBPM ? 'repeat(auto-fill, minmax(280px, 1fr))' : 'repeat(auto-fill, minmax(180px, 1fr))', 
+                    gap: isBPM ? '15px' : '8px' 
+                }}>
+                    {achievements.map(a => <AchievementItem key={a.name} a={a} config={config} isBPM={isBPM} />)}
                 </div>
             )}
         </div>
     );
 };
 
+// --- UI Helpers ---
+
 const showGSEConfig = (appId: string, doc: Document) => {
+    const win = (doc.defaultView || window) as any;
+    const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
+    if (!rd) return;
+
     const modalRoot = doc.createElement('div');
     doc.body.appendChild(modalRoot);
-    const win = (doc.defaultView || window) as any;
-    const rd = win.SP_REACTDOM || win.ReactDOM || (window as any).SP_REACTDOM || (window as any).ReactDOM;
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
         else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
         modalRoot.remove();
     };
+
     const element = (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }} onClick={onClose}>
-            <div style={{ width: '600px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: '500px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
                 <GSEGameSettings appId={appId} />
                 <div style={{ padding: '10px', textAlign: 'right', borderTop: '1px solid #333' }}>
                     <button style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer' }} onClick={onClose}>Close</button>
@@ -142,209 +180,90 @@ const showGSEConfig = (appId: string, doc: Document) => {
             </div>
         </div>
     );
-    if (rd?.createRoot) {
-        if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
-        (modalRoot as any)._gseRoot.render(element);
-    } else if (rd?.render) {
-        rd.render(element, modalRoot);
-    }
-};
 
-let lastDesktopAppId: string | null = null;
-let lastBPMAppId: string | null = null;
+    if (rd?.createRoot) {
+        const root = (modalRoot as any)._gseRoot || rd.createRoot(modalRoot);
+        (modalRoot as any)._gseRoot = root;
+        root.render(element);
+    } else rd.render(element, modalRoot);
+};
 
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
-    const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
-    
-    let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    if (appId) return appId;
-    
-    appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
-    if (appId) return appId;
-
-    const headerImageSelectors = [
-        "._3NBxSLAZLbbbnul8KfDFjw._2dzwXkCVAuZGFC-qKgo8XB",
-        'img.HNbe3eZf6H7dtJ042x1vM[src*="library_hero"]'
-    ];
-    for (const selector of headerImageSelectors) {
-        const img = doc.querySelector(selector) as HTMLImageElement;
-        if (img && img.src) {
-            const match = img.src.match(/\/assets\/(\d+)/);
+    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
+    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    if (!id) {
+        const imgs = Array.from(doc.querySelectorAll('img'));
+        for (const img of imgs) {
+            const match = (img.src || "").match(/\/assets\/(\d+)/);
             if (match) return match[1];
         }
     }
-
-    const allImgs = Array.from(doc.querySelectorAll('img'));
-    for (const img of allImgs) {
-        const match = (img.src || "").match(/\/assets\/(\d+)/);
-        if (match) return match[1];
-    }
-
-    return null;
-}
-
-const injectDesktop = (doc: Document) => {
-    const appId = getAppId(doc);
-    if (!appId) return;
-
-    if (appId !== lastDesktopAppId) {
-        log("injectDesktop triggered for AppID:", appId);
-        lastDesktopAppId = appId;
-    }
-
-    // Modern injection point: Next to SVGIcon_Settings grandparent
-    const settingsIcon = doc.querySelector('.SVGIcon_Settings');
-    if (settingsIcon) {
-        const grandparent = settingsIcon.closest('._3oddBTkj_FjknCgBnPqcmQ');
-        const container = grandparent?.parentElement;
-
-        if (container && !container.querySelector('.gse-details-button')) {
-            log("Desktop settings icon found, injecting next to its container.");
-            
-            const wrapper = doc.createElement('div');
-            wrapper.className = '_3oddBTkj_FjknCgBnPqcmQ gse-details-button-wrapper';
-            
-            const btn = doc.createElement('div');
-            btn.className = '_3qDWQGB0rtwM3qpXTb11Q- Focusable gse-details-button';
-            btn.setAttribute('role', 'button');
-            btn.setAttribute('tabindex', '0');
-            btn.setAttribute('aria-label', 'GSE Achievements');
-            btn.style.display = 'flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            
-            btn.innerHTML = `
-                <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;">
-                    <path d="M18,2H6C4.9,2,4,2.9,4,4v2c0,2.2,1.8,4,4,4h1v1.7c-2.3,0.5-4,2.5-4,4.8V20h16v-1.5c0-2.3-1.7-4.3-4-4.8V10h1c2.2,0,4-1.8,4-4V4 C20,2.9,19.1,2,18,2z M6,6V4h2v2H6z M18,6h-2V4h2V6z"></path>
-                </svg>`;
-            
-            wrapper.appendChild(btn);
-            grandparent.insertAdjacentElement('afterend', wrapper);
-            
-            btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
-            return;
-        }
-    }
-
-    // Legacy fallback for linksBar
-    const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
-    if (linksBar) {
-        let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
-        const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
-        const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
-        
-        if (lastSteamBtn) {
-            const leftPos = parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8;
-            if (!btn) {
-                log("Desktop linksBar found, injecting button.");
-                btn = doc.createElement('div');
-                btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
-                btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
-                linksBar.appendChild(btn);
-                btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
-            }
-            btn.style.cssText = `left: ${leftPos}px; top: 0px; position: absolute;`;
-        }
-    }
+    return id;
 };
 
-const injectBPM = async (doc: Document) => {
+// --- Core Logic ---
+
+let lastInjectedAppId: string | null = null;
+
+const processInjection = async (doc: Document) => {
+    const isBPM = !doc.body.classList.contains("DesktopUI");
     const appId = getAppId(doc);
     if (!appId) return;
 
-    const whatsNewContent = doc.getElementById('«rs7»WhatsNew_Content') || 
-                            doc.getElementById('«rod»WhatsNew_Content') ||
-                            doc.querySelector('[id*="WhatsNew_Content"]');
-    if (!whatsNewContent) {
-        const existing = doc.querySelector('.gse-bpm-injected');
-        if (existing) {
-            log("WhatsNew_Content not found, removing injection.");
-            existing.remove();
-            lastBPMAppId = null;
-        }
+    // Check for "What's New" content - robust detection
+    const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
+                     doc.getElementById('«rod»WhatsNew_Content') ||
+                     doc.querySelector('[id*="WhatsNew_Content"]');
+
+    if (!whatsNew) {
+        const existing = doc.querySelector('.gse-injected-view');
+        if (existing) { existing.remove(); lastInjectedAppId = null; }
         return;
     }
 
-    if (appId !== lastBPMAppId) {
-        log("BPM Game changed:", appId);
-        const existing = doc.querySelector('.gse-bpm-injected');
+    if (appId !== lastInjectedAppId) {
+        const existing = doc.querySelector('.gse-injected-view');
         if (existing) existing.remove();
-        lastBPMAppId = appId;
+        lastInjectedAppId = appId;
     }
 
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
-    if (container && !container.querySelector('.gse-bpm-injected')) {
-        log("BPM target container found, attempting injection for AppID:", appId);
+    if (container && !container.querySelector('.gse-injected-view')) {
+        log(`Injecting Achievements for ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
         
         const win = (doc.defaultView || window) as any;
         const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
         if (!rd) return;
 
         const injectDiv = doc.createElement('div');
-        injectDiv.className = 'gse-bpm-injected';
+        injectDiv.className = 'gse-injected-view';
         injectDiv.style.width = '100%';
         container.prepend(injectDiv);
 
-        const achievements = parseResult(await getAchievements({ app_id: appId }));
-        const config = parseResult(await getGameConfig({ app_id: appId }));
-        
-        const unlockedCount = achievements.filter((a: any) => a.unlocked).length;
-
-        const element = (
-            <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '15px' }}>
-                    <h2 style={{ fontSize: '24px', margin: 0 }}>GSE Achievements</h2>
-                    <span style={{ fontSize: '16px', color: '#888' }}>Earned {unlockedCount} of {achievements.length}</span>
-                </div>
-                {(!config || !config.interface_path) ? (
-                    <div style={{ color: '#888' }}>Please configure achievement paths in Desktop Mode.</div>
-                ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
-                        {achievements.map((a: any) => <AchievementItem key={a.name} a={a} config={config} isBPM={true} />)}
-                    </div>
-                )}
-            </div>
-        );
+        const element = <AchievementsView appId={appId} isBPM={isBPM} doc={doc} />;
         
         if (rd.createRoot) {
             const root = (injectDiv as any)._gseRoot || rd.createRoot(injectDiv);
             (injectDiv as any)._gseRoot = root;
             root.render(element);
-        } else {
-            rd.render(element, injectDiv);
-        }
-        log("BPM injection complete for:", appId);
-    }
-};
-
-const processInjection = (doc: Document) => {
-    const isDesktop = doc.body.classList.contains("DesktopUI");
-    if (isDesktop) {
-        injectDesktop(doc);
-    } else {
-        injectBPM(doc);
+        } else rd.render(element, injectDiv);
     }
 };
 
 export default definePlugin(() => {
-    log("GSE Plugin Initialized");
-
-    // Main window observer
-    const mainObserver = new MutationObserver(() => processInjection(document));
-    mainObserver.observe(document.body, { childList: true, subtree: true });
-    injectDesktop(document);
-
-    // Additional windows hook
-    (Millennium as any).AddWindowCreateHook?.((context: any) => {
-        const doc = context.m_popup?.document;
-        if (!doc?.body) return;
-        
+    const observe = (doc: Document) => {
         const observer = new MutationObserver(() => processInjection(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
         processInjection(doc);
+    };
+
+    observe(document);
+    (Millennium as any).AddWindowCreateHook?.((context: any) => {
+        const doc = context.m_popup?.document;
+        if (doc?.body) observe(doc);
     });
 
     return { title: "GSE Achievements", icon: <IconsModule.Settings />, content: <div style={{padding: '20px'}}>GSE active.</div> };
