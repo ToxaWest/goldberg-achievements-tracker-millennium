@@ -144,76 +144,81 @@ const getAppId = (doc: Document) => {
     
     // 1. Try MainWindowBrowserManager path
     let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    if (appId) { log("Detected AppID from Manager:", appId); return appId; }
     
     // 2. Try window location href
-    if (!appId) appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    if (appId) { log("Detected AppID from Location href:", appId); return appId; }
 
     // 3. Try the HLTB-style pattern (/assets/(\d+)) from header images
-    if (!appId) {
-        const headerImageSelectors = [
-            "._3NBxSLAZLbbbnul8KfDFjw._2dzwXkCVAuZGFC-qKgo8XB",
-            'img.HNbe3eZf6H7dtJ042x1vM[src*="library_hero"]'
-        ];
-        for (const selector of headerImageSelectors) {
-            const img = doc.querySelector(selector) as HTMLImageElement;
-            if (img && img.src) {
-                const match = img.src.match(/\/assets\/(\d+)/);
-                if (match) {
-                    appId = match[1];
-                    break;
-                }
+    const headerImageSelectors = [
+        "._3NBxSLAZLbbbnul8KfDFjw._2dzwXkCVAuZGFC-qKgo8XB",
+        'img.HNbe3eZf6H7dtJ042x1vM[src*="library_hero"]'
+    ];
+    for (const selector of headerImageSelectors) {
+        const img = doc.querySelector(selector) as HTMLImageElement;
+        if (img && img.src) {
+            const match = img.src.match(/\/assets\/(\d+)/);
+            if (match) {
+                appId = match[1];
+                log("Detected AppID from Header Image (" + selector + "):", appId);
+                return appId;
             }
         }
     }
 
-    // 4. Fallback to SteamClient active app ID
-    if (!appId && win.SteamClient?.Apps?.GetActiveAppID) {
-        // This is async in some contexts, but let's see if we can get it
-        try {
-            // Some versions of Millennium/Steam exposed this synchronously or we can't await here easily
-            // But if it's available, it's a good fallback
-        } catch(e) {}
+    // 4. Fallback search in all images for any /assets/ pattern
+    const allImgs = Array.from(doc.querySelectorAll('img'));
+    for (const img of allImgs) {
+        const match = img.src.match(/\/assets\/(\d+)/);
+        if (match) {
+            appId = match[1];
+            log("Detected AppID from general image match:", appId);
+            return appId;
+        }
     }
 
-    return appId;
+    return null;
 }
 
 const injectDesktop = (doc: Document) => {
     const appId = getAppId(doc);
-
     if (!appId) return;
+
     if (appId !== lastAppId) {
-        log("Desktop Game Page:", appId);
+        log("Injecting Desktop for AppID:", appId);
         lastAppId = appId;
     }
 
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
-    if (linksBar) {
-        let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
-        const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
-        const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
-        if (lastSteamBtn) {
-            if (!btn) {
-                btn = doc.createElement('div');
-                btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
-                btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
-                linksBar.appendChild(btn);
-            }
-            btn.style.cssText = `left: ${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px; top: 0px; position: absolute;`;
-            btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId!, doc); };
-        }
+    if (!linksBar) return;
+
+    let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
+    if (btn) return;
+
+    const steamButtons = Array.from(linksBar.children).filter(c => (c as HTMLElement).style.left);
+    const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
+    
+    if (lastSteamBtn) {
+        log("Found last button for positioning, injecting GSE button.");
+        btn = doc.createElement('div');
+        btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
+        btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
+        linksBar.appendChild(btn);
+        btn.style.cssText = `left: ${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px; top: 0px; position: absolute;`;
+        btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
     }
 };
 
 const injectBPM = async (doc: Document) => {
     const appId = getAppId(doc);
-
     if (!appId) return;
 
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
     if (container && !container.querySelector('.gse-bpm-injected')) {
+        log("Injecting BPM for AppID:", appId);
         const injectDiv = doc.createElement('div');
         injectDiv.className = 'gse-bpm-injected';
         injectDiv.style.width = '100%';
@@ -245,6 +250,8 @@ const injectBPM = async (doc: Document) => {
 };
 
 export default definePlugin(() => {
+    log("GSE Plugin Initialized");
+
     // 1. Hook for the main window (Desktop)
     const desktopObserver = new MutationObserver(() => injectDesktop(document));
     desktopObserver.observe(document.body, { childList: true, subtree: true });
@@ -252,8 +259,11 @@ export default definePlugin(() => {
 
     // 2. Hook for Big Picture Mode and other popups
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
-        const isBPM = context.m_strName?.startsWith("SP ");
-        const isSteam = context.m_strName === "Steam";
+        const name = context.m_strName || "Unknown";
+        log("Window Created:", name);
+
+        const isBPM = name.startsWith("SP ");
+        const isSteam = name === "Steam";
         
         if (!isBPM && !isSteam) return;
         
