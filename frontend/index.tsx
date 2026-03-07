@@ -112,7 +112,7 @@ const showGSEConfig = (appId: string, doc: Document) => {
     const modalRoot = doc.createElement('div');
     doc.body.appendChild(modalRoot);
     const win = (doc.defaultView || window) as any;
-    const rd = win.SP_REACTDOM || win.ReactDOM || (window as any).SP_REACTDOM;
+    const rd = win.SP_REACTDOM || win.ReactDOM || (window as any).SP_REACTDOM || (window as any).ReactDOM;
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
         else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
@@ -184,24 +184,24 @@ const injectDesktop = (doc: Document) => {
     }
 
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
-    if (!linksBar) {
-        return;
-    }
+    if (!linksBar) return;
 
     let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
-    if (btn) return;
-
-    const steamButtons = Array.from(linksBar.children).filter(c => (c as HTMLElement).style.left);
+    const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
     const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
     
     if (lastSteamBtn) {
-        log("Desktop linksBar found, injecting button for AppID:", appId);
-        btn = doc.createElement('div');
-        btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
-        btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
-        linksBar.appendChild(btn);
-        btn.style.cssText = `left: ${parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8}px; top: 0px; position: absolute;`;
-        btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
+        const leftPos = parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8;
+        if (!btn) {
+            log("Desktop linksBar found, injecting button for AppID:", appId);
+            btn = doc.createElement('div');
+            btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
+            btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
+            linksBar.appendChild(btn);
+            btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
+        }
+        // Always sync position
+        btn.style.cssText = `left: ${leftPos}px; top: 0px; position: absolute;`;
     }
 };
 
@@ -219,18 +219,21 @@ const injectBPM = async (doc: Document) => {
 
     if (container && !container.querySelector('.gse-bpm-injected')) {
         log("BPM container found, attempting injection for AppID:", appId);
+        
+        const win = (doc.defaultView || window) as any;
+        const rd = win.SP_REACTDOM || win.ReactDOM || (window as any).SP_REACTDOM || (window as any).ReactDOM;
+        
+        if (!rd) {
+            // Silence this log if we already tried and failed to keep console clean, 
+            // but for now let's keep it to verify the fix.
+            log("BPM Error: React/ReactDOM not found in window. SP_REACTDOM:", !!win.SP_REACTDOM, "ReactDOM:", !!win.ReactDOM);
+            return;
+        }
+
         const injectDiv = doc.createElement('div');
         injectDiv.className = 'gse-bpm-injected';
         injectDiv.style.width = '100%';
         container.prepend(injectDiv);
-        
-        const win = (doc.defaultView || window) as any;
-        const rd = win.SP_REACTDOM || win.ReactDOM;
-        
-        if (!rd) {
-            log("BPM Error: React/ReactDOM not found in window");
-            return;
-        }
 
         const achievements = parseResult(await getAchievements({ app_id: appId }));
         const config = parseResult(await getGameConfig({ app_id: appId }));
@@ -249,8 +252,13 @@ const injectBPM = async (doc: Document) => {
             </div>
         );
         
-        if (rd.createRoot) rd.createRoot(injectDiv).render(element);
-        else rd.render(element, injectDiv);
+        if (rd.createRoot) {
+            const root = (injectDiv as any)._gseRoot || rd.createRoot(injectDiv);
+            (injectDiv as any)._gseRoot = root;
+            root.render(element);
+        } else {
+            rd.render(element, injectDiv);
+        }
         log("BPM injection complete.");
     }
 };
@@ -271,12 +279,7 @@ export default definePlugin(() => {
 
         log("Window Created hook triggered for:", name);
 
-        const isBPM = name.startsWith("SP ");
-        const isSteam = name === "Steam";
-        
-        // We observe everything that might be a game page
         const observer = new MutationObserver(() => {
-            // We try both because some windows are misidentified or hybrid
             injectDesktop(doc);
             injectBPM(doc);
         });
