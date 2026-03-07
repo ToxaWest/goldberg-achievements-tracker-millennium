@@ -24,23 +24,38 @@ const callBackend = async (method: string, args: any) => {
     const m = getGlobal('Millennium');
     if (!m?.callServerMethod) return null;
     try {
-        log(`Backend Call Attempt: ${method}`, args);
-        // PASS POSITIONALLY: (app_id, interface, status)
-        // This is the most reliable way to bypass argument shifting issues
-        const res = await m.callServerMethod("goldberg-achievements", method, args.app_id, args.interface_path || "", args.status_path || "");
-        log(`Backend Response Received (${method}):`, res);
+        log(`Calling Backend: ${method}`, args);
+        // PASS AS ARRAY: [app_id, interface, status]
+        // This maps to varargs (...) in Lua, allowing our iterator to find them
+        const callArgs = [args.app_id, args.interface_path || "", args.status_path || ""];
+        const res = await m.callServerMethod("goldberg-achievements", method, callArgs);
+        
+        log(`Backend Result (${method}):`, res);
         if (typeof res === 'string') {
             try { return JSON.parse(res); } catch (e) { return res; }
         }
         return res;
     } catch (e) {
-        log(`Backend Call Exception (${method}):`, e);
+        log(`Backend Error (${method}):`, e);
         return null;
     }
 };
 
+const notify = (title: string, message: string) => {
+    try {
+        const sc = getGlobal('SteamClient');
+        const fn = sc?.Notifications?.DisplayNotification || sc?.DisplayNotification;
+        if (typeof fn === 'function') {
+            fn.call(sc?.Notifications || sc, title, message, "", "");
+        } else {
+            log("NOTIFICATION (No Native):", title, message);
+        }
+    } catch (e) {}
+};
+
 const AchievementItem = ({ a }: { a: any }) => {
     const iconUrl = a.icon ? "file:///" + a.icon.replace(/\\/g, '/') : null;
+    
     return (
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
             <div style={{ width: '32px', height: '32px', background: '#222', flexShrink: 0, borderRadius: '3px', overflow: 'hidden' }}>
@@ -63,6 +78,10 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     const [achievements, setAchievements] = React.useState<any[]>([]);
     const [isLoading, setIsLoading] = React.useState(true);
 
+    const btnRef = React.useRef<HTMLButtonElement>(null);
+    const iPickerRef = React.useRef<HTMLButtonElement>(null);
+    const sPickerRef = React.useRef<HTMLButtonElement>(null);
+
     const loadData = async () => {
         const config = await callBackend('get_game_config', { app_id: appId });
         if (config) {
@@ -79,14 +98,11 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     }, [appId]);
 
     const handleBrowse = async (setter: (val: string) => void) => {
-        log("Browse button clicked");
+        log("Browse Clicked");
         const sc = getGlobal('SteamClient');
-        
-        // DEEP SCAN for OpenFilePicker
         const findPicker = (obj: any, depth = 0): any => {
             if (!obj || depth > 2) return null;
             if (typeof obj.OpenFilePicker === 'function') return obj.OpenFilePicker.bind(obj);
-            
             for (const key of Object.keys(obj)) {
                 try {
                     const found = findPicker(obj[key], depth + 1);
@@ -99,59 +115,92 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
         const picker = findPicker(sc) || findPicker((window as any).opener?.SteamClient) || findPicker((window as any).top?.SteamClient);
         
         if (!picker) {
-            log("CRITICAL: OpenFilePicker not found even after deep scan.");
-            alert("Native file picker not found. Please paste path manually.");
+            log("Picker not found.");
+            notify("GSE Error", "File picker not found in this window.");
             return;
         }
 
         try {
-            log("Found picker! Launching...");
             const path = await picker("Select achievements.json", "", false);
             if (path) {
                 const normalized = path.replace(/\\/g, '/').replace(/"/g, '').trim();
-                log("Path selected:", normalized);
+                log("Path Selected:", normalized);
                 setter(normalized);
             }
         } catch (e) {
-            log("Picker Execution Error:", e);
+            log("Picker Error:", e);
         }
     };
 
     const handleSave = async () => {
-        log("Save button clicked", { appId, interfacePath, statusPath });
-        const res = await callBackend('save_game_config', { app_id: appId, interface_path: interfacePath, status_path: statusPath });
-        if (res && res.success) {
-            log("Save successful!");
+        log("Save Clicked", { appId, interfacePath, statusPath });
+        const res = await callBackend('save_game_config', { 
+            app_id: appId, 
+            interface_path: interfacePath, 
+            status_path: statusPath 
+        });
+        
+        if (res && (res.success || res.success === "true")) {
+            notify("GSE Achievements", "Settings saved successfully!");
             loadData();
         } else {
-            log("Save failed message shown to user");
-            alert("Save failed. Check Steam console for details.");
+            log("Save Failed. Backend said:", res);
+            notify("GSE Error", "Save failed. Check console.");
         }
     };
 
-    if (isLoading) return <div style={{padding: '20px', color: '#888'}}>Syncing with backend...</div>;
+    // Use direct DOM listeners as a nuclear option for Steam UI compatibility
+    React.useEffect(() => {
+        const saveBtn = btnRef.current;
+        const iBtn = iPickerRef.current;
+        const sBtn = sPickerRef.current;
+
+        const onSave = (e: Event) => { e.preventDefault(); handleSave(); };
+        const onIBrowse = (e: Event) => { e.preventDefault(); handleBrowse(setInterfacePath); };
+        const onSBrowse = (e: Event) => { e.preventDefault(); handleBrowse(setStatusPath); };
+
+        saveBtn?.addEventListener('click', onSave);
+        iBtn?.addEventListener('click', onIBrowse);
+        sBtn?.addEventListener('click', onSBrowse);
+
+        return () => {
+            saveBtn?.removeEventListener('click', onSave);
+            iBtn?.removeEventListener('click', onIBrowse);
+            sBtn?.removeEventListener('click', onSBrowse);
+        };
+    }, [interfacePath, statusPath, appId]);
+
+    if (isLoading) return <div style={{padding: '20px', color: '#888'}}>Loading configuration...</div>;
 
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
-            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Achievement Settings</h2>
+            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings</h2>
             
             <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH (Metadata)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>METADATA PATH (achievements.json)</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                    <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={interfacePath} onChange={e => setInterfacePath(e.target.value)} />
-                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setInterfacePath)}>📁</button>
+                    <input 
+                        style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }}
+                        value={interfacePath} 
+                        onChange={e => setInterfacePath(e.target.value)} 
+                    />
+                    <button ref={iPickerRef} style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }}>📁</button>
                 </div>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH (Unlocks)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH (achievements.json)</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                    <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={statusPath} onChange={e => setStatusPath(e.target.value)} />
-                    <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setStatusPath)}>📁</button>
+                    <input 
+                        style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }}
+                        value={statusPath} 
+                        onChange={e => setStatusPath(e.target.value)} 
+                    />
+                    <button ref={sPickerRef} style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }}>📁</button>
                 </div>
             </div>
 
-            <button style={{ width: '100%', background: '#1a9fff', border: 'none', color: 'white', padding: '12px', fontWeight: 'bold', cursor: 'pointer' }} onClick={handleSave}>Save Settings</button>
+            <button ref={btnRef} style={{ width: '100%', background: '#1a9fff', border: 'none', color: 'white', padding: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Save Settings</button>
 
             {achievements.length > 0 && (
                 <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
@@ -250,6 +299,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
+        content: <div style={{padding: '20px'}}>GSE Active.</div>,
     };
 });
