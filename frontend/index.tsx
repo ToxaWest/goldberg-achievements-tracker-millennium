@@ -266,6 +266,110 @@ const injectGameDetails = () => {
     }
 };
 
+const GSEConfigModal = ({ appId, onClose }: { appId: string; onClose: () => void }) => {
+    return (
+        <div 
+            style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                backdropFilter: 'blur(3px)'
+            }} 
+            onClick={onClose}
+        >
+            <div 
+                style={{
+                    width: '600px', background: '#1e2127',
+                    borderRadius: '4px', border: '1px solid #3d4450',
+                    boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+                    overflow: 'hidden', color: 'white',
+                    animation: 'modalFadeIn 0.2s ease-out'
+                }} 
+                onClick={e => e.stopPropagation()}
+            >
+                <style>{`
+                    @keyframes modalFadeIn {
+                        from { opacity: 0; transform: translateY(-20px); }
+                        to { opacity: 1; transform: translateY(0); }
+                    }
+                `}</style>
+                <div style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', background: '#2a2e33', borderBottom: '1px solid #3d4450', alignItems: 'center' }}>
+                    <div style={{ fontSize: '1.2em', fontWeight: 'bold' }}>GSE Achievements Tracker</div>
+                    <div onClick={onClose} style={{ cursor: 'pointer', fontSize: '24px', lineHeight: '1', color: '#888' }}>×</div>
+                </div>
+                <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+                    <GSEGameSettings appId={appId} />
+                </div>
+                <div style={{ padding: '15px', background: '#2a2e33', borderTop: '1px solid #3d4450', display: 'flex', justifyContent: 'flex-end' }}>
+                    <DialogButton onClick={onClose}>Close</DialogButton>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const showGSEConfig = (appId: string) => {
+    const modalRoot = document.createElement('div');
+    modalRoot.id = 'gse-modal-root';
+    document.body.appendChild(modalRoot);
+    
+    const onClose = () => {
+        const ReactDOM = (window as any).ReactDOM;
+        if (ReactDOM?.unmountComponentAtNode) {
+            ReactDOM.unmountComponentAtNode(modalRoot);
+        }
+        modalRoot.remove();
+    };
+
+    const ReactDOM = (window as any).ReactDOM;
+    if (ReactDOM?.createRoot) {
+        ReactDOM.createRoot(modalRoot).render(<GSEConfigModal appId={appId} onClose={onClose} />);
+    } else if (ReactDOM?.render) {
+        ReactDOM.render(<GSEConfigModal appId={appId} onClose={onClose} />, modalRoot);
+    }
+};
+
+const injectGameDetailsButton = () => {
+    // Target the horizontal links bar
+    const container = document.querySelector('.DgVQapkBmhAW6oPY5rPZo');
+    if (container && !container.querySelector('.gse-details-button')) {
+        const appIdMatch = window.location.href.match(/\/app\/(\d+)/);
+        const appId = appIdMatch ? appIdMatch[1] : null;
+        if (!appId) return;
+
+        // Find position for the new button
+        const lastItem = container.lastElementChild as HTMLElement;
+        let nextLeft = 0;
+        if (lastItem) {
+            const lastLeft = parseInt(lastItem.style.left || '0');
+            // Steam uses absolute positioning with fixed offsets
+            nextLeft = lastLeft + (lastItem.offsetWidth || 100) + 8;
+        }
+
+        const btnContainer = document.createElement('div');
+        btnContainer.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
+        btnContainer.style.left = `${nextLeft}px`;
+        btnContainer.style.top = '0px';
+        btnContainer.style.position = 'absolute';
+
+        btnContainer.innerHTML = `
+            <div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0">
+                <div class="_1b6LYWVijW-9E4YV0keDWZ">
+                    <span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span>
+                </div>
+            </div>
+        `;
+        
+        btnContainer.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showGSEConfig(appId);
+        });
+        
+        container.appendChild(btnContainer);
+    }
+};
+
 const injectIntoGeneral = () => {
     // Try to find the General page by looking for text markers if class names are obfuscated
     const findTarget = () => {
@@ -409,6 +513,7 @@ export default definePlugin(() => {
     setInterval(() => {
         if (window.location.href.includes('/library/app/')) {
             injectGameDetails();
+            injectGameDetailsButton();
         }
         
         // Always try injecting into General if visible
