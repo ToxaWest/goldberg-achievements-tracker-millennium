@@ -1,4 +1,4 @@
-import { Millennium, definePlugin, callable, IconsModule, Field, DialogButton, TextField } from '@steambrew/client';
+import { Millennium, definePlugin, callable, IconsModule } from '@steambrew/client';
 import React from 'react';
 
 const getGameConfig = callable<[{ app_id: string }], any>('get_game_config');
@@ -9,21 +9,20 @@ const log = (...args: any[]) => console.log("[GSE]", ...args);
 
 let lastAppId: string | null = null;
 
-/**
- * Robust renderer using Steam's internal SP_REACTDOM
- */
+const notify = (title: string, message: string) => {
+    try {
+        (window as any).SteamClient?.Notifications?.DisplayNotification(title, message, "", "");
+    } catch (e) {
+        log("Notification failed:", title, message);
+    }
+};
+
 const steamRender = (element: React.ReactElement, container: HTMLElement) => {
     try {
         const rd = (window as any).SP_REACTDOM;
-        if (!rd) {
-            log("SP_REACTDOM not found, falling back to vanilla innerHTML");
-            return;
-        }
-
+        if (!rd) return;
         if (rd.createRoot) {
-            if (!(container as any)._gseRoot) {
-                (container as any)._gseRoot = rd.createRoot(container);
-            }
+            if (!(container as any)._gseRoot) (container as any)._gseRoot = rd.createRoot(container);
             (container as any)._gseRoot.render(element);
         } else {
             rd.render(element, container);
@@ -43,11 +42,6 @@ const getAppId = async (doc: Document): Promise<string | null> => {
     }
     const match = win.location.href.match(/\/app\/(\d+)/) || win.location.href.match(/appid=(\d+)/);
     if (match) return match[1];
-    const images = doc.querySelectorAll('img[src*="/assets/"]');
-    for (const img of Array.from(images) as HTMLImageElement[]) {
-        const imgMatch = img.src.match(/\/assets\/(\d+)/);
-        if (imgMatch) return imgMatch[1];
-    }
     return null;
 };
 
@@ -64,52 +58,101 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     const [interfacePath, setInterfacePath] = React.useState('');
     const [statusPath, setStatusPath] = React.useState('');
     const [achievements, setAchievements] = React.useState<any[]>([]);
+    const [isLoading, setIsLoading] = React.useState(true);
     const gameName = getGameName(appId);
 
-    const loadConfig = async () => {
-        const config = await getGameConfig({ app_id: appId });
-        setInterfacePath(config.interface_path || '');
-        setStatusPath(config.status_path || '');
-        const data = await getAchievements({ app_id: appId });
-        setAchievements(data || []);
-    };
+    React.useEffect(() => {
+        const load = async () => {
+            try {
+                const config = await getGameConfig({ app_id: appId });
+                if (config) {
+                    setInterfacePath(config.interface_path || '');
+                    setStatusPath(config.status_path || '');
+                }
+                const data = await getAchievements({ app_id: appId });
+                setAchievements(data || []);
+            } catch (e) {
+                log("Load error:", e);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        load();
+    }, [appId]);
 
-    React.useEffect(() => { loadConfig(); }, [appId]);
-
-    const handleSave = async () => {
-        const res = await saveGameConfig({ 
-            app_id: appId, 
-            interface_path: interfacePath.replace(/\\/g, '/').replace(/"/g, '').trim(), 
-            status_path: statusPath.replace(/\\/g, '/').replace(/"/g, '').trim() 
-        });
-        if (res?.success) {
-            const data = await getAchievements({ app_id: appId });
-            setAchievements(data || []);
+    const handleBrowse = async (setter: (val: string) => void) => {
+        const client = (window as any).SteamClient;
+        if (client?.Window?.OpenFilePicker) {
+            const path = await client.Window.OpenFilePicker("Select achievements.json", "", false);
+            if (path) setter(path.replace(/\\/g, '/').replace(/"/g, '').trim());
         }
     };
 
+    const handleSave = async () => {
+        log("Save requested for", appId);
+        const res = await saveGameConfig({ 
+            app_id: appId, 
+            interface_path: interfacePath, 
+            status_path: statusPath 
+        });
+        if (res?.success) {
+            notify("GSE Achievements", `Saved settings for ${gameName}`);
+            const data = await getAchievements({ app_id: appId });
+            setAchievements(data || []);
+        } else {
+            notify("GSE Error", "Failed to save settings.");
+        }
+    };
+
+    if (isLoading) return <div style={{padding: '20px', color: '#888'}}>Loading configuration...</div>;
+
     return (
-        <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px' }}>
-            <h2 style={{ marginBottom: '20px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>{gameName}</h2>
+        <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
+            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>{gameName}</h2>
             
-            <Field label="Interface Path (Metadata)">
-                <TextField value={interfacePath} onChange={(e:any)=>setInterfacePath(e.target.value)} />
-            </Field>
-            
-            <Field label="Status Path (Unlocked)">
-                <TextField value={statusPath} onChange={(e:any)=>setStatusPath(e.target.value)} />
-            </Field>
-            
-            <DialogButton onClick={handleSave} style={{ width: '100%', marginTop: '20px' }}>Save Settings</DialogButton>
-            
+            <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', color: '#888', fontSize: '12px', marginBottom: '5px' }}>Interface Path (achievements.json metadata)</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <input 
+                        style={{ flex: 1, background: '#121418', border: '1px solid #3d4450', padding: '8px', color: 'white', borderRadius: '4px' }}
+                        value={interfacePath} 
+                        onChange={e => setInterfacePath(e.target.value)} 
+                    />
+                    <button 
+                        style={{ background: '#3d4450', border: 'none', color: 'white', padding: '0 12px', borderRadius: '4px', cursor: 'pointer' }}
+                        onClick={() => handleBrowse(setInterfacePath)}
+                    >📁</button>
+                </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', color: '#888', fontSize: '12px', marginBottom: '5px' }}>Status Path (achievements.json unlock status)</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <input 
+                        style={{ flex: 1, background: '#121418', border: '1px solid #3d4450', padding: '8px', color: 'white', borderRadius: '4px' }}
+                        value={statusPath} 
+                        onChange={e => setStatusPath(e.target.value)} 
+                    />
+                    <button 
+                        style={{ background: '#3d4450', border: 'none', color: 'white', padding: '0 12px', borderRadius: '4px', cursor: 'pointer' }}
+                        onClick={() => handleBrowse(setStatusPath)}
+                    >📁</button>
+                </div>
+            </div>
+
+            <button 
+                style={{ width: '100%', background: '#1a9fff', border: 'none', color: 'white', padding: '12px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
+                onClick={handleSave}
+            >Save Settings</button>
+
             {achievements.length > 0 && (
                 <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
-                    <div style={{ marginBottom: '10px', fontSize: '14px', color: '#888' }}>
+                    <div style={{ color: '#888', fontSize: '12px', marginBottom: '10px' }}>
                         {achievements.filter(a=>a.unlocked).length} / {achievements.length} Achievements
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px', maxHeight: '200px', overflowY: 'auto', padding: '10px', background: 'rgba(0,0,0,0.2)' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px', maxHeight: '150px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', padding: '10px' }}>
                         {achievements.map(a => (
-                            <div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#666', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                                 {a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}
                             </div>
                         ))}
@@ -133,10 +176,10 @@ const showGSEConfig = (appId: string, doc: Document) => {
 
     steamRender(
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }} onClick={onClose}>
-            <div style={{ width: '600px', background: '#1e2127', borderRadius: '8px', border: '1px solid #3d4450', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: '600px', background: '#1e2127', borderRadius: '8px', border: '1px solid #3d4450' }} onClick={e => e.stopPropagation()}>
                 <GSEGameSettings appId={appId} />
-                <div style={{ padding: '15px', textAlign: 'right', borderTop: '1px solid #333' }}>
-                    <DialogButton onClick={onClose}>Close</DialogButton>
+                <div style={{ padding: '10px', textAlign: 'right', borderTop: '1px solid #333' }}>
+                    <button style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer' }} onClick={onClose}>Close</button>
                 </div>
             </div>
         </div>,
@@ -153,7 +196,6 @@ const processInjection = async (doc: Document) => {
         lastAppId = appId;
     }
 
-    // 1. Links Bar
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
     if (linksBar && !linksBar.querySelector('.gse-details-button')) {
         const steamButtons = Array.from(linksBar.children).filter(c => (c as HTMLElement).style.left);
@@ -175,21 +217,6 @@ const processInjection = async (doc: Document) => {
         }
         linksBar.appendChild(btn);
     }
-
-    // 2. General Properties
-    const generalTarget = Array.from(doc.querySelectorAll('*')).find((el: any) => 
-        (el.innerText === 'Launch Options' || el.innerText === 'LAUNCH OPTIONS' || el.innerText === 'Steam Cloud') && el.offsetWidth > 0
-    );
-    if (generalTarget && !doc.querySelector('.gse-general-injected')) {
-        const target = generalTarget.closest('[class*="Section"]') || generalTarget.parentElement;
-        if (target) {
-            const injectDiv = doc.createElement('div');
-            injectDiv.className = 'gse-general-injected';
-            injectDiv.style.cssText = 'margin: 20px 0; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);';
-            target.parentElement?.insertBefore(injectDiv, target);
-            steamRender(<GSEGameSettings appId={appId} />, injectDiv);
-        }
-    }
 };
 
 export default definePlugin(() => {
@@ -197,7 +224,6 @@ export default definePlugin(() => {
         if (!context.m_strName?.startsWith("SP ")) return;
         const doc = context.m_popup?.document;
         if (!doc?.body) return;
-
         const observer = new MutationObserver(() => processInjection(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
         processInjection(doc);
@@ -206,6 +232,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE Achievements is running. Configure per-game in Details or Properties.</div>,
+        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
     };
 });
