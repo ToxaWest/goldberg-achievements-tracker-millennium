@@ -1,5 +1,6 @@
 import { Millennium, definePlugin, callable, IconsModule, Field, DialogButton, TextField } from '@steambrew/client';
 import React from 'react';
+import ReactDOM from 'react-dom';
 
 const getGameConfig = callable<[{ app_id: string }], any>('get_game_config');
 const getAchievements = callable<[{ app_id: string }], any>('get_achievements');
@@ -9,24 +10,34 @@ const log = (...args: any[]) => console.log("[GSE]", ...args);
 
 let lastAppId: string | null = null;
 
-const getReactDOM = () => {
-    const win = window as any;
-    return win.ReactDOM || win.opener?.ReactDOM || win.parent?.ReactDOM || (win.MainWindowBrowserManager && win.MainWindowBrowserManager.m_ReactDOM);
-};
-
 const getAppId = async (doc: Document): Promise<string | null> => {
     const win = (doc.defaultView || window) as any;
+    
+    // 1. Try MainWindowBrowserManager (The most reliable for SPA navigation)
     if (win.MainWindowBrowserManager?.m_lastLocation?.pathname) {
         const match = win.MainWindowBrowserManager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
         if (match) return match[1];
     }
+
+    // 2. Try SteamClient API
+    if (win.SteamClient?.Apps?.GetActiveAppID) {
+        try {
+            const appId = await win.SteamClient.Apps.GetActiveAppID();
+            if (appId && appId > 0) return String(appId);
+        } catch (e) {}
+    }
+
+    // 3. Try URL parsing
     const match = win.location.href.match(/\/app\/(\d+)/) || win.location.href.match(/appid=(\d+)/);
     if (match) return match[1];
+
+    // 4. Image-based fallback (HLTB method)
     const images = doc.querySelectorAll('img[src*="/assets/"]');
     for (const img of Array.from(images) as HTMLImageElement[]) {
         const imgMatch = img.src.match(/\/assets\/(\d+)/);
         if (imgMatch) return imgMatch[1];
     }
+    
     return null;
 };
 
@@ -92,15 +103,11 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 };
 
 const showGSEConfig = (appId: string) => {
-    const modalRoot = document.createElement('div') as any;
+    const modalRoot = document.createElement('div');
     document.body.appendChild(modalRoot);
     
-    const rd = getReactDOM();
-    if (!rd) return console.error("[GSE] ReactDOM not found");
-
     const onClose = () => {
-        if (rd.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
-        else if (modalRoot._root) modalRoot._root.unmount();
+        ReactDOM.unmountComponentAtNode(modalRoot);
         modalRoot.remove();
     };
 
@@ -113,12 +120,7 @@ const showGSEConfig = (appId: string) => {
         </div>
     );
 
-    if (rd.createRoot) {
-        modalRoot._root = rd.createRoot(modalRoot);
-        modalRoot._root.render(element);
-    } else {
-        rd.render(element, modalRoot);
-    }
+    ReactDOM.render(element, modalRoot);
 };
 
 const processInjection = async (doc: Document) => {
@@ -151,7 +153,7 @@ const processInjection = async (doc: Document) => {
                 linksBar.appendChild(btn);
             } else {
                 (existing as HTMLElement).style.left = `${nextLeft}px`;
-                (existing as any).onclick = () => showGSEConfig(appId); // Update appId
+                (existing as any).onclick = () => showGSEConfig(appId); // Update appId reference
             }
         }
     }
@@ -162,26 +164,29 @@ const processInjection = async (doc: Document) => {
     );
     if (generalTarget && !doc.querySelector('.gse-general-injected')) {
         const target = generalTarget.closest('[class*="Section"]') || generalTarget.parentElement;
-        const rd = getReactDOM();
-        if (target && rd) {
+        if (target) {
             const injectDiv = doc.createElement('div');
             injectDiv.className = 'gse-general-injected';
             injectDiv.style.cssText = 'margin: 20px 0; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);';
             target.parentElement?.insertBefore(injectDiv, target);
-            if (rd.createRoot) rd.createRoot(injectDiv).render(<GSEGameSettings appId={appId} />);
-            else rd.render(<GSEGameSettings appId={appId} />, injectDiv);
+            ReactDOM.render(<GSEGameSettings appId={appId} />, injectDiv);
         }
     }
 };
 
 export default definePlugin(() => {
+    log("Plugin Loading...");
+
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
         if (!context.m_strName?.startsWith("SP ")) return;
         const doc = context.m_popup?.document;
         if (!doc?.body) return;
 
+        log("Attached to window:", context.m_strName);
+
         const observer = new MutationObserver(() => processInjection(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
+        
         processInjection(doc);
     });
 
