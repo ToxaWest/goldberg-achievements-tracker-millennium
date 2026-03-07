@@ -36,48 +36,57 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- Robust Argument Parser
-local function get_payload(a1, a2, a3)
-    if type(a1) == "table" then 
-        return {
-            app_id = tostring(a1.app_id or a1[1] or ""),
-            interface_path = a1.interface_path or a1[2] or "",
-            status_path = a1.status_path or a1[3] or ""
-        }
+-- EXTREMELY ROBUST ARGUMENT EXTRACTOR
+-- Millennium sometimes shifts arguments. We scan for our AppID/Table.
+local function get_payload(...)
+    local args = {...}
+    
+    -- Print argument summary to Steam Console for debugging
+    local log_str = "GSE ARGS: "
+    for i, v in ipairs(args) do
+        log_str = log_str .. "[" .. i .. ":" .. type(v) .. "] "
     end
-    if type(a1) == "string" and (a1:sub(1,1) == "{" or a1:sub(1,1) == "[") then
-        local decoded = safe_decode(a1)
-        if type(decoded) == "table" then 
+    print(log_str)
+
+    for i, v in ipairs(args) do
+        -- 1. Look for a table with our data
+        if type(v) == "table" and v.app_id then
+            return v
+        end
+        -- 2. Look for a string that could be a JSON payload
+        if type(v) == "string" and v:sub(1,1) == "{" then
+            local decoded = safe_decode(v)
+            if type(decoded) == "table" and decoded.app_id then
+                return decoded
+            end
+        end
+        -- 3. Look for a string that is a numeric AppID
+        if type(v) == "string" and v:match("^%d+$") then
             return {
-                app_id = tostring(decoded.app_id or decoded[1] or ""),
-                interface_path = decoded.interface_path or decoded[2] or "",
-                status_path = decoded.status_path or decoded[3] or ""
+                app_id = v,
+                interface_path = args[i+1] or "",
+                status_path = args[i+2] or ""
             }
         end
     end
-    return {
-        app_id = tostring(a1 or ""),
-        interface_path = tostring(a2 or ""),
-        status_path = tostring(a3 or "")
-    }
+    
+    return {}
 end
 
 -- Exposed Methods
-function get_game_config(a1, a2, a3)
-    local p = get_payload(a1, a2, a3)
+function get_game_config(...)
+    local p = get_payload(...)
     local id = tostring(p.app_id or "nil")
-    print("GSE: get_game_config for " .. id)
+    print("GSE: Fetching config for " .. id)
     return json.encode(configs[id] or {})
 end
 
-function save_game_config(a1, a2, a3)
-    local p = get_payload(a1, a2, a3)
+function save_game_config(...)
+    local p = get_payload(...)
     local id = tostring(p.app_id or "")
-    print("GSE: save_game_config for " .. id)
+    print("GSE: Saving config for " .. id)
     
-    if id == "" or id == "nil" then 
-        return json.encode({ success = false, error = "No AppID detected" }) 
-    end
+    if id == "" then return json.encode({ success = false, error = "Backend Error: Missing AppID" }) end
 
     configs[id] = { 
         interface_path = p.interface_path or "", 
@@ -86,29 +95,24 @@ function save_game_config(a1, a2, a3)
     
     local ok = safe_write_file(settings_path, json.encode(configs))
     
-    -- Load status immediately
+    -- Cache status
     local status_data = safe_decode(safe_read_file(p.status_path))
     if status_data then last_status_map[id] = status_data end
     
     return json.encode({ success = ok })
 end
 
-function get_achievements(a1, a2, a3)
-    local p = get_payload(a1, a2, a3)
+function get_achievements(...)
+    local p = get_payload(...)
     local id = tostring(p.app_id or "nil")
-    print("GSE: get_achievements for " .. id)
+    print("GSE: Fetching achievements for " .. id)
     
     local cfg = configs[id]
     if not cfg then return json.encode({}) end
     
     local meta = safe_decode(safe_read_file(cfg.interface_path)) or {}
     local status = safe_decode(safe_read_file(cfg.status_path)) or {}
-    
-    -- Safe path matching for base directory
-    local base_dir = ""
-    if type(cfg.interface_path) == "string" then
-        base_dir = cfg.interface_path:match("(.*[/\\])") or ""
-    end
+    local base_dir = cfg.interface_path:match("(.*[/\\])") or ""
     
     local res = {}
     for _, ach in ipairs(meta) do
@@ -131,15 +135,9 @@ end
 
 -- Lifecycle
 local function on_load()
-    print("GSE Achievements: Loading from " .. settings_path)
+    print("GSE Backend Init")
     local content = safe_read_file(settings_path)
     if content then configs = safe_decode(content) or {} end
-    
-    for id, config in pairs(configs) do
-        local status_data = safe_decode(safe_read_file(config.status_path))
-        if status_data then last_status_map[id] = status_data end
-    end
-    
     millennium.ready()
 end
 
