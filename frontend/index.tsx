@@ -23,9 +23,6 @@ const parseResult = (res: any) => {
 // 2. COMPONENTS
 // ============================================================================
 
-/**
- * Individual achievement row
- */
 const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM: boolean }) => {
     const [iconData, setIconData] = React.useState<string | null>(null);
 
@@ -66,9 +63,6 @@ const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM: boo
     );
 };
 
-/**
- * Settings Modal Content
- */
 const GSEGameSettings = ({ appId }: { appId: string }) => {
     const [config, setConfig] = React.useState<any>(null);
     const [isLoading, setIsLoading] = React.useState(true);
@@ -113,15 +107,13 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     );
 };
 
-/**
- * Main Achievements Grid View
- */
 const AchievementsView = ({ appId, isBPM, doc }: { appId: string, isBPM: boolean, doc: Document }) => {
     const [config, setConfig] = React.useState<any>(null);
     const [achievements, setAchievements] = React.useState<any[]>([]);
 
     const load = async () => {
         const cfg = parseResult(await getGameConfig({ app_id: appId }));
+        log(`View: Config for ID ${appId} >`, cfg);
         setConfig(cfg);
         const data = parseResult(await getAchievements({ app_id: appId }));
         setAchievements(Array.isArray(data) ? data : []);
@@ -203,32 +195,38 @@ const showGSEConfig = (appId: string, doc: Document) => {
 };
 
 /**
- * Robust AppID detection
+ * Separated AppID detection logic for Desktop and BPM
  */
 const getAppId = (doc: Document, isDesktop: boolean) => {
-    // 1. Try URL Match (highly reliable for popups and game pages)
-    const urlMatch = doc.location.href.match(/\/app\/(\d+)/) || doc.location.pathname.match(/\/app\/(\d+)/);
-    if (urlMatch) return urlMatch[1];
+    const win = (doc.defaultView || window) as any;
 
-    // 2. Try Hero Images / Assets (very reliable for rendered content)
-    const hero = doc.querySelector('img[src*="/assets/"], img[src*="library_hero"], img[class*="LibraryHero"]');
-    const heroId = (hero as any)?.src?.match(/\/assets\/(\d+)/)?.[1];
-    if (heroId) return heroId;
+    if (isDesktop) {
+        // 1. Try local Manager first (it correctly updates on library navigation)
+        const manager = win.MainWindowBrowserManager;
+        const id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+        if (id) return id;
 
-    // 3. Fallback search all images
-    const imgs = Array.from(doc.querySelectorAll('img'));
-    for (const img of imgs) {
-        const match = (img.src || img.getAttribute('src') || "").match(/\/assets\/(\d+)/);
+        // 2. Try specific Hero Image selectors (avoids picking up sidebar icons)
+        const heroSelectors = [
+            '._3NBxSLAZLbbbnul8KfDFjw._2dzwXkCVAuZGFC-qKgo8XB', // Custom header
+            'img.HNbe3eZf6H7dtJ042x1vM[src*="library_hero"]',   // Specific hero class
+            'img[class*="libraryhero_LibraryHeroImg"]'          // Generic hero class
+        ];
+        for (const sel of heroSelectors) {
+            const img = doc.querySelector(sel) as HTMLImageElement;
+            const match = img?.src?.match(/\/assets\/(\d+)/) || img?.src?.match(/\/apps\/(\d+)/);
+            if (match) return match[1];
+        }
+    } else {
+        // BPM Scenario: URL is extremely reliable in popups
+        const urlMatch = doc.location.href.match(/\/app\/(\d+)/) || doc.location.pathname.match(/\/app\/(\d+)/);
+        if (urlMatch) return urlMatch[1];
+
+        // Hero Image fallback for BPM
+        const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"]');
+        const match = (hero as any)?.src?.match(/\/assets\/(\d+)/);
         if (match) return match[1];
     }
-
-    // 4. Desktop Manager fallback
-    if (isDesktop) {
-        const win = (doc.defaultView || window) as any;
-        const manager = win.MainWindowBrowserManager || (window.top as any)?.MainWindowBrowserManager;
-        return manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    }
-
     return null;
 };
 
@@ -262,7 +260,7 @@ const processInjection = async (doc: Document) => {
         }
     }
 
-    // Handle game switch or missing view
+    // Container for injection
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
