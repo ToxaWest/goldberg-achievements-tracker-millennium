@@ -33,43 +33,51 @@ local function safe_write_file(path, content)
 end
 
 local function safe_decode(content)
-    if not content then return nil end
-    if type(content) ~= "string" then return content end
+    if not content or type(content) ~= "string" then return content end
     local status, result = pcall(json.decode, content)
     return status and result or nil
 end
 
 -- Robust Argument Normalization
--- Some Millennium versions stringify the payload, others pass it as a table
-local function normalize_payload(payload)
+local function get_args(...)
+    local args = {...}
+    print("GSE Debug: Received " .. #args .. " arguments")
+    for i, v in ipairs(args) do
+        print("  Arg[" .. i .. "] type: " .. type(v) .. " value: " .. tostring(v))
+    end
+
+    local payload = args[1]
     if type(payload) == "string" then
         local decoded = safe_decode(payload)
-        if type(decoded) == "table" then return decoded end
+        if type(decoded) == "table" then
+            print("GSE Debug: Decoded string payload into table")
+            return decoded
+        end
     end
-    return payload
+    
+    if type(payload) == "table" then return payload end
+    
+    -- Fallback: positional
+    return {
+        app_id = args[1],
+        interface_path = args[2],
+        status_path = args[3]
+    }
 end
 
 -- Exposed Methods
-function get_game_config(payload)
-    payload = normalize_payload(payload)
-    local app_id = tostring(type(payload) == "table" and (payload.app_id or payload[1]) or payload or "nil")
+function get_game_config(...)
+    local payload = get_args(...)
+    local app_id = tostring(payload.app_id or "nil")
     print("GSE: get_game_config for " .. app_id)
-    
     local cfg = configs[app_id] or {}
     return json.encode(cfg)
 end
 
-function save_game_config(payload)
-    payload = normalize_payload(payload)
-    print("GSE: save_game_config called")
-    
-    if type(payload) ~= "table" then
-        print("GSE: Error - payload still " .. type(payload))
-        return json.encode({ success = false, error = "Invalid payload type: " .. type(payload) })
-    end
-    
+function save_game_config(...)
+    local payload = get_args(...)
     local app_id = tostring(payload.app_id or "")
-    print("GSE: Saving config for AppID: " .. app_id)
+    print("GSE: save_game_config for " .. app_id)
     
     if app_id == "" then 
         return json.encode({ success = false, error = "Missing AppID" }) 
@@ -82,16 +90,15 @@ function save_game_config(payload)
     
     local success = safe_write_file(settings_path, json.encode(configs))
     
-    -- Refresh status map
     local status_data = safe_decode(safe_read_file(payload.status_path))
     if status_data then last_status_map[app_id] = status_data end
     
     return json.encode({ success = success })
 end
 
-function get_achievements(payload)
-    payload = normalize_payload(payload)
-    local app_id = tostring(type(payload) == "table" and (payload.app_id or payload[1]) or payload or "nil")
+function get_achievements(...)
+    local payload = get_args(...)
+    local app_id = tostring(payload.app_id or "nil")
     print("GSE: get_achievements for " .. app_id)
     
     local config = configs[app_id]
@@ -115,18 +122,15 @@ function get_achievements(payload)
     return json.encode(result)
 end
 
+function get_all_configs()
+    return json.encode(configs)
+end
+
 -- Lifecycle
 local function on_load()
     print("GSE Achievements: Loading from " .. settings_path)
     local content = safe_read_file(settings_path)
     if content then configs = safe_decode(content) or {} end
-    
-    for app_id, config in pairs(configs) do
-        local status_data = safe_decode(safe_read_file(config.status_path))
-        if status_data then last_status_map[app_id] = status_data end
-    end
-    
-    if Steam and Steam.SetInterval then Steam.SetInterval(3000, check_achievements) end
     millennium.ready()
 end
 
@@ -136,5 +140,6 @@ return {
     on_unload = function() print("GSE: Unloading") end,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
-    get_achievements = get_achievements
+    get_achievements = get_achievements,
+    get_all_configs = get_all_configs
 }
