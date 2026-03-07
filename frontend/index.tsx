@@ -191,23 +191,22 @@ const showGSEConfig = (appId: string, doc: Document) => {
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
     
-    // 1. Try window's own MainWindowBrowserManager (prioritize browsed game)
-    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
-    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    // 1. Try local window's own MainWindowBrowserManager (most reliable for browsed game)
+    let id = win.MainWindowBrowserManager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     
-    // 2. Try window location href
-    if (!id) id = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    // 2. Try window location href or pathname
+    if (!id) id = doc.location.pathname.match(/\/app\/(\d+)/)?.[1] || doc.location.href.match(/\/app\/(\d+)/)?.[1];
     
-    if (id) return id;
-
-    // 3. Try assets check (reliable fallback for game pages)
-    const imgs = Array.from(doc.querySelectorAll('img'));
-    for (const img of imgs) {
-        const match = (img.src || "").match(/\/assets\/(\d+)/);
-        if (match) return match[1];
+    // 3. Check assets fallback (only on current document)
+    if (!id) {
+        const imgs = Array.from(doc.querySelectorAll('img'));
+        for (const img of imgs) {
+            const match = (img.src || "").match(/\/assets\/(\d+)/);
+            if (match) return match[1];
+        }
     }
     
-    return null;
+    return id;
 };
 
 // --- Core Logic ---
@@ -215,13 +214,19 @@ const getAppId = (doc: Document) => {
 const injectedIds = new WeakMap<Document, string>();
 
 const processInjection = async (doc: Document) => {
-    const isDesktop = doc.body.classList.contains("DesktopUI") || document.body.classList.contains("DesktopUI");
+    const isDesktop = doc.body.classList.contains("DesktopUI");
     const isBPM = !isDesktop;
 
     const appId = getAppId(doc);
-    if (!appId) return;
+    
+    // If no AppID, cleanup and exit
+    if (!appId) {
+        const existing = doc.querySelector('.gse-injected-view');
+        if (existing) { existing.remove(); injectedIds.delete(doc); }
+        return;
+    }
 
-    // Check for "What's New" content - robust detection (BPM only as it has many tabs)
+    // BPM Tab Check
     if (isBPM) {
         const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
                          doc.getElementById('«rod»WhatsNew_Content') ||
