@@ -218,7 +218,9 @@ const injectBPM = async (doc: Document) => {
     const appId = getAppId(doc);
     if (!appId) return;
 
-    const whatsNewContent = doc.getElementById('«rs7»WhatsNew_Content');
+    const whatsNewContent = doc.getElementById('«rs7»WhatsNew_Content') || 
+                            doc.getElementById('«rod»WhatsNew_Content') ||
+                            doc.querySelector('[id*="WhatsNew_Content"]');
     if (!whatsNewContent) {
         const existing = doc.querySelector('.gse-bpm-injected');
         if (existing) {
