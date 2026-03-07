@@ -4,50 +4,50 @@ import React from 'react';
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
 /**
- * Robust global discovery
+ * Enhanced Global/Method Finder
  */
 const getGlobal = (name: string): any => {
     const win = window as any;
     if (win[name]) return win[name];
     try {
         if (win.opener && win.opener[name]) return win.opener[name];
+        if (win.top && win.top[name]) return win.top[name];
         if (win.parent && win.parent[name]) return win.parent[name];
     } catch (e) {}
-
-    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager || win.parent?.MainWindowBrowserManager;
+    
+    // Check core Steam manager
+    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
     if (manager) {
         if (manager[name]) return manager[name];
         if (manager.m_browser && manager.m_browser[name]) return manager.m_browser[name];
-        if (manager.m_browser?.window && manager.m_browser.window[name]) return manager.m_browser.window[name];
     }
     return null;
 };
 
-/**
- * Scans an object for a specific method (up to 2 levels deep)
- */
-const findMethod = (obj: any, methodName: string): any => {
-    if (!obj) return null;
-    if (typeof obj[methodName] === 'function') return obj[methodName].bind(obj);
-    
-    // Check one level deeper (e.g. SteamClient.Window.OpenFilePicker)
-    for (const key of Object.keys(obj)) {
-        try {
-            const sub = obj[key];
-            if (sub && typeof sub[methodName] === 'function') {
-                return sub[methodName].bind(sub);
-            }
-        } catch (e) {}
+const findMethod = (methodName: string): any => {
+    const sc = getGlobal('SteamClient');
+    if (!sc) return null;
+
+    const paths = [
+        sc,
+        sc.Window,
+        sc.Browser,
+        sc.Notifications,
+        sc.System,
+        sc.UI
+    ];
+
+    for (const p of paths) {
+        if (p && typeof p[methodName] === 'function') {
+            return p[methodName].bind(p);
+        }
     }
     return null;
 };
 
 const callBackend = async (method: string, args: any) => {
     const m = getGlobal('Millennium');
-    if (!m?.callServerMethod) {
-        log("Millennium.callServerMethod not found");
-        return null;
-    }
+    if (!m?.callServerMethod) return null;
     try {
         const res = await m.callServerMethod("goldberg-achievements", method, args);
         if (typeof res === 'string') {
@@ -61,13 +61,11 @@ const callBackend = async (method: string, args: any) => {
 };
 
 const notify = (title: string, message: string) => {
-    const sc = getGlobal('SteamClient');
-    const displayFn = findMethod(sc, 'DisplayNotification') || findMethod(sc?.Notifications, 'DisplayNotification');
-    
+    const displayFn = findMethod('DisplayNotification');
     if (displayFn) {
         displayFn(title, message, "", "");
     } else {
-        log("NOTIFICATION:", title, message);
+        log("NOTIFY:", title, message);
     }
 };
 
@@ -86,12 +84,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
                     setStatusPath(config.status_path || '');
                 }
                 const data = await callBackend('get_achievements', { app_id: appId });
-                // Handle Lua {} becoming JS {} instead of []
-                if (data && typeof data === 'object' && !Array.isArray(data)) {
-                    setAchievements(Object.values(data));
-                } else {
-                    setAchievements(Array.isArray(data) ? data : []);
-                }
+                setAchievements(Array.isArray(data) ? data : []);
             } catch (e) {
                 log("Load error:", e);
             } finally {
@@ -102,44 +95,29 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     }, [appId]);
 
     const handleBrowse = async (setter: (val: string) => void) => {
-        const sc = getGlobal('SteamClient');
-        const picker = findMethod(sc, 'OpenFilePicker');
-        
+        const picker = findMethod('OpenFilePicker');
         if (!picker) {
-            log("OpenFilePicker not found anywhere in SteamClient.");
-            notify("GSE Error", "File picker not found. Please paste path manually.");
+            notify("GSE Error", "File picker not available in this window.");
             return;
         }
-
         try {
-            log("Opening File Picker...");
             const path = await picker("Select achievements.json", "", false);
-            if (path) {
-                const normalized = path.replace(/\\/g, '/').replace(/"/g, '').trim();
-                log("Selected:", normalized);
-                setter(normalized);
-            }
+            if (path) setter(path.replace(/\\/g, '/').replace(/"/g, '').trim());
         } catch (e) {
             log("Picker failed:", e);
         }
     };
 
     const handleSave = async () => {
-        log("Saving for:", appId);
         const res = await callBackend('save_game_config', { 
             app_id: appId, 
             interface_path: interfacePath, 
             status_path: statusPath 
         });
-        
         if (res && res.success) {
             notify("GSE Achievements", "Settings saved successfully!");
             const data = await callBackend('get_achievements', { app_id: appId });
-            if (data && typeof data === 'object' && !Array.isArray(data)) {
-                setAchievements(Object.values(data));
-            } else {
-                setAchievements(Array.isArray(data) ? data : []);
-            }
+            setAchievements(Array.isArray(data) ? data : []);
         } else {
             notify("GSE Error", "Backend failed to save settings.");
         }
@@ -152,7 +130,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
             
             <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH (Metadata)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={interfacePath} onChange={e => setInterfacePath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setInterfacePath)}>📁</button>
@@ -160,7 +138,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH (Unlocks)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={statusPath} onChange={e => setStatusPath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setStatusPath)}>📁</button>
@@ -190,7 +168,7 @@ const showGSEConfig = (appId: string, doc: Document) => {
     const rd = getGlobal('SP_REACTDOM');
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
-        else if ((modalRoot as any)._root) (modalRoot as any)._root.unmount();
+        else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
         modalRoot.remove();
     };
     const element = (
@@ -203,16 +181,11 @@ const showGSEConfig = (appId: string, doc: Document) => {
             </div>
         </div>
     );
-    
-    try {
-        if (rd?.createRoot) {
-            if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
-            (modalRoot as any)._gseRoot.render(element);
-        } else if (rd?.render) {
-            rd.render(element, modalRoot);
-        }
-    } catch (e) {
-        log("Modal Render Error:", e);
+    if (rd?.createRoot) {
+        if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
+        (modalRoot as any)._gseRoot.render(element);
+    } else if (rd?.render) {
+        rd.render(element, modalRoot);
     }
 };
 
@@ -272,6 +245,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE Active.</div>,
+        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
     };
 });

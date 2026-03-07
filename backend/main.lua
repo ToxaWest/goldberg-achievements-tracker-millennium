@@ -67,39 +67,72 @@ local function check_achievements()
     end
 end
 
--- Exposed Methods (Returning JSON strings to match HLTB style)
+-- Helper to get AppID from various payload formats
+local function get_payload_appid(payload)
+    if not payload then return nil end
+    if type(payload) == "table" then
+        return payload.app_id or payload[1]
+    end
+    return payload
+end
+
+-- Exposed Methods
 function get_game_config(payload)
-    print("GSE: get_game_config for " .. tostring(payload.app_id))
-    local cfg = configs[tostring(payload.app_id)] or {}
+    local app_id = get_payload_appid(payload)
+    print("GSE: get_game_config for " .. tostring(app_id))
+    if not app_id then return json.encode({}) end
+    
+    local cfg = configs[tostring(app_id)] or {}
     return json.encode(cfg)
 end
 
 function save_game_config(payload)
-    local app_id = tostring(payload.app_id)
+    if not payload or type(payload) ~= "table" then 
+        print("GSE: save_game_config failed - invalid payload")
+        return json.encode({ success = false, error = "Invalid payload" }) 
+    end
+    
+    local app_id = tostring(payload.app_id or "")
     print("GSE: save_game_config for " .. app_id)
-    configs[app_id] = { interface_path = payload.interface_path, status_path = payload.status_path }
+    
+    if app_id == "" then return json.encode({ success = false, error = "Missing AppID" }) end
+
+    configs[app_id] = { 
+        interface_path = payload.interface_path or "", 
+        status_path = payload.status_path or "" 
+    }
+    
     local success = safe_write_file(settings_path, json.encode(configs))
     
     local status = safe_decode(safe_read_file(payload.status_path))
     if status then last_status_map[app_id] = status end
+    
     return json.encode({ success = success })
 end
 
 function get_achievements(payload)
-    local app_id = tostring(payload.app_id)
-    print("GSE: get_achievements for " .. app_id)
-    local config = configs[app_id]
+    local app_id = get_payload_appid(payload)
+    print("GSE: get_achievements for " .. tostring(app_id))
+    if not app_id then return json.encode({}) end
+    
+    local config = configs[tostring(app_id)]
     if not config then return json.encode({}) end
     
     local meta = safe_decode(safe_read_file(config.interface_path)) or {}
     local status = safe_decode(safe_read_file(config.status_path)) or {}
     
+    -- Ensure meta is a list
+    local result = {}
     for _, ach in ipairs(meta) do
         local ach_status = status[ach.name] or {}
-        ach.unlocked = ach_status.unlocked or false
-        ach.unlock_time = ach_status.unlock_time or 0
+        table.insert(result, {
+            name = ach.name,
+            display_name = ach.display_name or ach.name,
+            unlocked = ach_status.unlocked or false,
+            unlock_time = ach_status.unlock_time or 0
+        })
     end
-    return json.encode(meta)
+    return json.encode(result)
 end
 
 function get_all_configs()
