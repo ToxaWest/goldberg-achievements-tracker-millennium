@@ -189,25 +189,20 @@ const showGSEConfig = (appId: string, doc: Document) => {
 };
 
 const getAppId = (doc: Document) => {
+    // 1. Try URL of this specific document first (most specific to the view)
+    let id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
+    if (id) return id;
+
+    // 2. Try images in THIS document - very reliable for current game page (HLTB style)
+    const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"], img[src*="library_hero"], img[src*="/assets/"]') as HTMLImageElement;
+    const match = (hero?.src || hero?.getAttribute('src'))?.match(/\/assets\/(\d+)/);
+    if (match) return match[1];
+
+    // 3. Check local window's MainWindowBrowserManager
     const win = (doc.defaultView || window) as any;
-    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager || (window as any).MainWindowBrowserManager;
+    id = win.MainWindowBrowserManager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     
-    // 1. Try local or opener MainWindowBrowserManager
-    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    
-    // 2. Try document URL
-    if (!id) id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
-    
-    // 3. Check assets fallback
-    if (!id) {
-        const imgs = Array.from(doc.querySelectorAll('img'));
-        for (const img of imgs) {
-            const match = (img.src || "").match(/\/assets\/(\d+)/);
-            if (match) return match[1];
-        }
-    }
-    
-    return id;
+    return id || null;
 };
 
 // --- Core Logic ---
