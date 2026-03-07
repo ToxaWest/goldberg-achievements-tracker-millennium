@@ -36,32 +36,48 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- Robust JSON payload handler
-local function get_payload(payload)
-    print("GSE DEBUG: Payload type is " .. type(payload))
-    if type(payload) == "string" then
-        print("GSE DEBUG: Decoding JSON payload...")
-        local decoded = safe_decode(payload)
-        if type(decoded) == "table" then return decoded end
+-- Robust Argument Parser
+local function get_payload(a1, a2, a3)
+    if type(a1) == "table" then 
+        return {
+            app_id = tostring(a1.app_id or a1[1] or ""),
+            interface_path = a1.interface_path or a1[2] or "",
+            status_path = a1.status_path or a1[3] or ""
+        }
     end
-    if type(payload) == "table" then return payload end
-    return {}
+    if type(a1) == "string" and (a1:sub(1,1) == "{" or a1:sub(1,1) == "[") then
+        local decoded = safe_decode(a1)
+        if type(decoded) == "table" then 
+            return {
+                app_id = tostring(decoded.app_id or decoded[1] or ""),
+                interface_path = decoded.interface_path or decoded[2] or "",
+                status_path = decoded.status_path or decoded[3] or ""
+            }
+        end
+    end
+    return {
+        app_id = tostring(a1 or ""),
+        interface_path = tostring(a2 or ""),
+        status_path = tostring(a3 or "")
+    }
 end
 
 -- Exposed Methods
-function get_game_config(payload)
-    local p = get_payload(payload)
+function get_game_config(a1, a2, a3)
+    local p = get_payload(a1, a2, a3)
     local id = tostring(p.app_id or "nil")
     print("GSE: get_game_config for " .. id)
     return json.encode(configs[id] or {})
 end
 
-function save_game_config(payload)
-    local p = get_payload(payload)
+function save_game_config(a1, a2, a3)
+    local p = get_payload(a1, a2, a3)
     local id = tostring(p.app_id or "")
     print("GSE: save_game_config for " .. id)
     
-    if id == "" then return json.encode({ success = false, error = "Backend Error: Missing AppID" }) end
+    if id == "" or id == "nil" then 
+        return json.encode({ success = false, error = "No AppID detected" }) 
+    end
 
     configs[id] = { 
         interface_path = p.interface_path or "", 
@@ -70,15 +86,15 @@ function save_game_config(payload)
     
     local ok = safe_write_file(settings_path, json.encode(configs))
     
-    -- Cache status
+    -- Load status immediately
     local status_data = safe_decode(safe_read_file(p.status_path))
     if status_data then last_status_map[id] = status_data end
     
     return json.encode({ success = ok })
 end
 
-function get_achievements(payload)
-    local p = get_payload(payload)
+function get_achievements(a1, a2, a3)
+    local p = get_payload(a1, a2, a3)
     local id = tostring(p.app_id or "nil")
     print("GSE: get_achievements for " .. id)
     
@@ -87,7 +103,12 @@ function get_achievements(payload)
     
     local meta = safe_decode(safe_read_file(cfg.interface_path)) or {}
     local status = safe_decode(safe_read_file(cfg.status_path)) or {}
-    local base_dir = cfg.interface_path:match("(.*[/\\])") or ""
+    
+    -- Safe path matching for base directory
+    local base_dir = ""
+    if type(cfg.interface_path) == "string" then
+        base_dir = cfg.interface_path:match("(.*[/\\])") or ""
+    end
     
     local res = {}
     for _, ach in ipairs(meta) do
@@ -101,7 +122,7 @@ function get_achievements(payload)
                 display_name = ach.displayName or ach.name,
                 description = ach.description or "",
                 unlocked = is_unlocked,
-                icon = (icon_rel and icon_rel ~= "") and (base_dir .. icon_rel) or ""
+                icon = (icon_rel and icon_rel ~= "" and base_dir ~= "") and (base_dir .. icon_rel) or ""
             })
         end
     end
@@ -110,9 +131,15 @@ end
 
 -- Lifecycle
 local function on_load()
-    print("GSE Achievements Backend Loading")
+    print("GSE Achievements: Loading from " .. settings_path)
     local content = safe_read_file(settings_path)
     if content then configs = safe_decode(content) or {} end
+    
+    for id, config in pairs(configs) do
+        local status_data = safe_decode(safe_read_file(config.status_path))
+        if status_data then last_status_map[id] = status_data end
+    end
+    
     millennium.ready()
 end
 

@@ -4,15 +4,17 @@ import React from 'react';
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
 /**
- * Robust global discovery
+ * Safe Global discovery (No recursion to prevent crashes)
  */
 const getGlobal = (name: string): any => {
     const win = window as any;
-    const sources = [win, win.opener, win.top, win.parent];
-    for (const s of sources) {
-        if (s && s[name]) return s[name];
-    }
-    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
+    if (win[name]) return win[name];
+    try {
+        if (win.opener && win.opener[name]) return win.opener[name];
+        if (win.top && win.top[name]) return win.top[name];
+    } catch (e) {}
+    
+    const manager = win.MainWindowBrowserManager || (window as any).opener?.MainWindowBrowserManager;
     if (manager) {
         if (manager[name]) return manager[name];
         if (manager.m_browser && manager.m_browser[name]) return manager.m_browser[name];
@@ -24,17 +26,14 @@ const callBackend = async (method: string, args: any) => {
     const m = getGlobal('Millennium');
     if (!m?.callServerMethod) return null;
     try {
-        log(`CALLING BACKEND: ${method}`, args);
-        // Force stringify to ensure arguments are not dropped by IPC
-        const res = await m.callServerMethod("goldberg-achievements", method, JSON.stringify(args));
-        log(`BACKEND RESPONSE (${method}):`, res);
-        
+        // Pass positional args for maximum stability
+        const res = await m.callServerMethod("goldberg-achievements", method, args.app_id, args.interface_path || "", args.status_path || "");
         if (typeof res === 'string' && (res.startsWith('{') || res.startsWith('['))) {
             try { return JSON.parse(res); } catch (e) { return res; }
         }
         return res;
     } catch (e) {
-        log(`BACKEND EXCEPTION (${method}):`, e);
+        log(`Backend error (${method}):`, e);
         return null;
     }
 };
@@ -50,7 +49,6 @@ const AchievementItem = ({ a }: { a: any }) => {
                 <div style={{ fontSize: '12px', fontWeight: 'bold', color: a.unlocked ? '#fff' : '#777', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {a.display_name}
                 </div>
-                {a.description && <div style={{ fontSize: '10px', color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.description}</div>}
             </div>
             {a.unlocked && <div style={{ color: '#4caf50', fontSize: '12px' }}>✓</div>}
         </div>
@@ -78,51 +76,28 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     const handleBrowse = async (setter: (val: string) => void) => {
         const sc = getGlobal('SteamClient');
-        if (!sc) return alert("SteamClient not found.");
-
-        // Exhaustive search for the picker method
-        const findMethod = (obj: any): any => {
-            if (!obj) return null;
-            if (typeof obj.OpenFilePicker === 'function') return obj.OpenFilePicker.bind(obj);
-            // Search all sub-objects (Window, Browser, etc)
-            for (const key of Object.keys(obj)) {
-                try {
-                    const sub = obj[key];
-                    if (sub && typeof sub.OpenFilePicker === 'function') return sub.OpenFilePicker.bind(sub);
-                } catch(e) {}
-            }
-            return null;
-        };
-
-        const picker = findMethod(sc) || findMethod((window.opener as any)?.SteamClient) || findMethod((window.top as any)?.SteamClient);
+        // Safe, non-recursive picker discovery
+        const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || sc?.OpenFilePicker || 
+                       (window as any).opener?.SteamClient?.Window?.OpenFilePicker;
         
-        if (!picker) {
-            log("Picker not found. Available keys:", Object.keys(sc));
-            alert("File picker not found. Please paste the path.");
+        if (typeof picker !== 'function') {
+            alert("File picker not found. Please paste path manually.");
             return;
         }
 
         try {
-            log("Opening Native Picker...");
             const path = await picker("Select achievements.json", "", false);
             if (path) setter(path.replace(/\\/g, '/').replace(/"/g, '').trim());
         } catch (e) {
-            log("Picker Error:", e);
+            log("Picker error:", e);
         }
     };
 
     const handleSave = async () => {
-        log("Save Button Pressed");
-        const res = await callBackend('save_game_config', { 
-            app_id: appId, 
-            interface_path: interfacePath, 
-            status_path: statusPath 
-        });
-        if (res && res.success) {
-            loadData();
-            log("Save confirmed success");
-        } else {
-            alert("Save failed. See console.");
+        const res = await callBackend('save_game_config', { app_id: appId, interface_path: interfacePath, status_path: statusPath });
+        if (res?.success) {
+            const data = await callBackend('get_achievements', { app_id: appId });
+            setAchievements(Array.isArray(data) ? data : []);
         }
     };
 
@@ -130,10 +105,10 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
-            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
+            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings</h2>
             
             <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH (Metadata)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={interfacePath} onChange={e => setInterfacePath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={(e) => { e.preventDefault(); handleBrowse(setInterfacePath); }}>📁</button>
@@ -141,7 +116,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH (Unlocks)</label>
+                <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <input style={{ flex: 1, background: '#121418', border: '1px solid #333', padding: '8px', color: 'white' }} value={statusPath} onChange={e => setStatusPath(e.target.value)} />
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={(e) => { e.preventDefault(); handleBrowse(setStatusPath); }}>📁</button>
@@ -152,6 +127,9 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
             {achievements.length > 0 && (
                 <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>
+                        {achievements.filter(a=>a.unlocked).length} / {achievements.length} Achievements
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', maxHeight: '250px', overflowY: 'auto' }}>
                         {achievements.map(a => <AchievementItem key={a.name} a={a} />)}
                     </div>
