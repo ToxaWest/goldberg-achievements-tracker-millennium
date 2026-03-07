@@ -48,7 +48,7 @@ const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM: boo
                     {a.display_name}
                 </div>
                 {isBPM && a.description && (
-                    <div style={{ fontSize: '11px', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ fontSize: '11px', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '2px' }}>
                         {a.description}
                     </div>
                 )}
@@ -190,14 +190,15 @@ const showGSEConfig = (appId: string, doc: Document) => {
 
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
+    const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager || (window as any).MainWindowBrowserManager;
     
-    // 1. Try local window's own MainWindowBrowserManager (most reliable for browsed game)
-    let id = win.MainWindowBrowserManager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    // 1. Try local or opener MainWindowBrowserManager
+    let id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     
-    // 2. Try window location href or pathname
-    if (!id) id = doc.location.pathname.match(/\/app\/(\d+)/)?.[1] || doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    // 2. Try document URL
+    if (!id) id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
     
-    // 3. Check assets fallback (only on current document)
+    // 3. Check assets fallback
     if (!id) {
         const imgs = Array.from(doc.querySelectorAll('img'));
         for (const img of imgs) {
@@ -214,12 +215,11 @@ const getAppId = (doc: Document) => {
 const injectedIds = new WeakMap<Document, string>();
 
 const processInjection = async (doc: Document) => {
-    const isDesktop = doc.body.classList.contains("DesktopUI");
+    const isDesktop = doc.documentElement.classList.contains("DesktopUI") || doc.body.classList.contains("DesktopUI");
     const isBPM = !isDesktop;
 
     const appId = getAppId(doc);
     
-    // If no AppID, cleanup and exit
     if (!appId) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) { existing.remove(); injectedIds.delete(doc); }
@@ -241,7 +241,7 @@ const processInjection = async (doc: Document) => {
 
     // Handle game switch per document
     if (appId !== injectedIds.get(doc)) {
-        log(`Game changed or new injection for ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
+        log(`Injection event: ${appId} (${isBPM ? 'BPM' : 'Desktop'})`);
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) existing.remove();
         injectedIds.set(doc, appId);
@@ -273,14 +273,14 @@ const processInjection = async (doc: Document) => {
 export default definePlugin(() => {
     const observe = (doc: Document) => {
         const observer = new MutationObserver(() => processInjection(doc));
-        observer.observe(doc.body, { childList: true, subtree: true });
+        observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true });
         processInjection(doc);
     };
 
     observe(document);
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
         const doc = context.m_popup?.document;
-        if (doc?.body) observe(doc);
+        if (doc) observe(doc);
     });
 
     return { title: "GSE Achievements", icon: <IconsModule.Settings />, content: <div style={{padding: '20px'}}>GSE active.</div> };
