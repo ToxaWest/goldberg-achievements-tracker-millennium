@@ -10,61 +10,44 @@ const log = (...args: any[]) => console.log("[GSE]", ...args);
 let lastAppId: string | null = null;
 
 /**
- * Safe notification helper for Steam
+ * Robust renderer using Steam's internal SP_REACTDOM
  */
-const notify = (title: string, message: string) => {
+const steamRender = (element: React.ReactElement, container: HTMLElement) => {
     try {
-        (window as any).SteamClient?.Notifications?.DisplayNotification(title, message, "", "");
-    } catch (e) {
-        log("Notification failed:", title, message);
-    }
-};
+        const rd = (window as any).SP_REACTDOM;
+        if (!rd) {
+            log("SP_REACTDOM not found, falling back to vanilla innerHTML");
+            return;
+        }
 
-/**
- * Hyper-aggressive ReactDOM discovery
- */
-const findReactDOM = (win: any): any => {
-    if (win.ReactDOM) return win.ReactDOM;
-    if (win.MainWindowBrowserManager?.m_ReactDOM) return win.MainWindowBrowserManager.m_ReactDOM;
-    if (win.Millennium?.ReactDOM) return win.Millennium.ReactDOM;
-    
-    try {
-        if (win.opener && win.opener !== win) {
-            const found = findReactDOM(win.opener);
-            if (found) return found;
+        if (rd.createRoot) {
+            if (!(container as any)._gseRoot) {
+                (container as any)._gseRoot = rd.createRoot(container);
+            }
+            (container as any)._gseRoot.render(element);
+        } else {
+            rd.render(element, container);
         }
-        if (win.parent && win.parent !== win) {
-            const found = findReactDOM(win.parent);
-            if (found) return found;
-        }
-    } catch (e) {}
-    
-    if (win !== window) return findReactDOM(window);
-    return null;
+    } catch (e) {
+        log("Steam Render Error:", e);
+    }
 };
 
 const getAppId = async (doc: Document): Promise<string | null> => {
     const win = (doc.defaultView || window) as any;
     const gWin = window as any;
-    
-    // Priority 1: MainWindowBrowserManager
     const manager = gWin.MainWindowBrowserManager || win.MainWindowBrowserManager;
     if (manager?.m_lastLocation?.pathname) {
         const match = manager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
         if (match) return match[1];
     }
-
-    // Priority 2: URL
     const match = win.location.href.match(/\/app\/(\d+)/) || win.location.href.match(/appid=(\d+)/);
     if (match) return match[1];
-
-    // Priority 3: Image Assets (HLTB style)
     const images = doc.querySelectorAll('img[src*="/assets/"]');
     for (const img of Array.from(images) as HTMLImageElement[]) {
         const imgMatch = img.src.match(/\/assets\/(\d+)/);
         if (imgMatch) return imgMatch[1];
     }
-    
     return null;
 };
 
@@ -83,16 +66,15 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     const [achievements, setAchievements] = React.useState<any[]>([]);
     const gameName = getGameName(appId);
 
-    React.useEffect(() => {
-        const load = async () => {
-            const config = await getGameConfig({ app_id: appId });
-            setInterfacePath(config.interface_path || '');
-            setStatusPath(config.status_path || '');
-            const data = await getAchievements({ app_id: appId });
-            setAchievements(data || []);
-        };
-        load();
-    }, [appId]);
+    const loadConfig = async () => {
+        const config = await getGameConfig({ app_id: appId });
+        setInterfacePath(config.interface_path || '');
+        setStatusPath(config.status_path || '');
+        const data = await getAchievements({ app_id: appId });
+        setAchievements(data || []);
+    };
+
+    React.useEffect(() => { loadConfig(); }, [appId]);
 
     const handleSave = async () => {
         const res = await saveGameConfig({ 
@@ -101,19 +83,37 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             status_path: statusPath.replace(/\\/g, '/').replace(/"/g, '').trim() 
         });
         if (res?.success) {
-            notify("GSE Achievements", `Saved settings for ${gameName}`);
+            const data = await getAchievements({ app_id: appId });
+            setAchievements(data || []);
         }
     };
 
     return (
-        <div style={{ padding: '20px', color: 'white', backgroundColor: '#1b2838' }}>
-            <h3 style={{ marginBottom: '15px' }}>{gameName}</h3>
-            <Field label="Interface Path"><TextField value={interfacePath} onChange={(e:any)=>setInterfacePath(e.target.value)} /></Field>
-            <Field label="Status Path"><TextField value={statusPath} onChange={(e:any)=>setStatusPath(e.target.value)} /></Field>
-            <DialogButton onClick={handleSave} style={{ width: '100%', marginTop: '10px' }}>Save Settings</DialogButton>
+        <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px' }}>
+            <h2 style={{ marginBottom: '20px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>{gameName}</h2>
+            
+            <Field label="Interface Path (Metadata)">
+                <TextField value={interfacePath} onChange={(e:any)=>setInterfacePath(e.target.value)} />
+            </Field>
+            
+            <Field label="Status Path (Unlocked)">
+                <TextField value={statusPath} onChange={(e:any)=>setStatusPath(e.target.value)} />
+            </Field>
+            
+            <DialogButton onClick={handleSave} style={{ width: '100%', marginTop: '20px' }}>Save Settings</DialogButton>
+            
             {achievements.length > 0 && (
-                <div style={{ marginTop: '15px', maxHeight: '150px', overflowY: 'auto', background: 'rgba(0,0,0,0.2)', padding: '10px' }}>
-                    {achievements.map(a => (<div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#888' }}>{a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}</div>))}
+                <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+                    <div style={{ marginBottom: '10px', fontSize: '14px', color: '#888' }}>
+                        {achievements.filter(a=>a.unlocked).length} / {achievements.length} Achievements
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px', maxHeight: '200px', overflowY: 'auto', padding: '10px', background: 'rgba(0,0,0,0.2)' }}>
+                        {achievements.map(a => (
+                            <div key={a.name} style={{ fontSize: '11px', color: a.unlocked ? '#4caf50' : '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {a.unlocked ? '✅' : '🔒'} {a.display_name || a.name}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
         </div>
@@ -121,38 +121,27 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 };
 
 const showGSEConfig = (appId: string, doc: Document) => {
-    const win = doc.defaultView || window;
-    const rd = findReactDOM(win);
-    
-    if (!rd) {
-        notify("GSE Error", "Could not find React renderer. See console.");
-        return;
-    }
-
     const modalRoot = doc.createElement('div');
     doc.body.appendChild(modalRoot);
     
     const onClose = () => {
-        if (rd.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
-        else if ((modalRoot as any)._root) (modalRoot as any)._root.unmount();
+        const rd = (window as any).SP_REACTDOM;
+        if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
+        else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
         modalRoot.remove();
     };
 
-    const element = (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onClose}>
-            <div style={{ width: '500px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
+    steamRender(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }} onClick={onClose}>
+            <div style={{ width: '600px', background: '#1e2127', borderRadius: '8px', border: '1px solid #3d4450', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
                 <GSEGameSettings appId={appId} />
-                <div style={{ padding: '10px', textAlign: 'right' }}><DialogButton onClick={onClose}>Close</DialogButton></div>
+                <div style={{ padding: '15px', textAlign: 'right', borderTop: '1px solid #333' }}>
+                    <DialogButton onClick={onClose}>Close</DialogButton>
+                </div>
             </div>
-        </div>
+        </div>,
+        modalRoot
     );
-
-    if (rd.createRoot) {
-        if (!(modalRoot as any)._root) (modalRoot as any)._root = rd.createRoot(modalRoot);
-        (modalRoot as any)._root.render(element);
-    } else {
-        rd.render(element, modalRoot);
-    }
 };
 
 const processInjection = async (doc: Document) => {
@@ -160,15 +149,16 @@ const processInjection = async (doc: Document) => {
     if (!appId) return;
 
     if (appId !== lastAppId) {
-        log("Game Page Detected:", appId);
+        log("Game Page:", appId);
         lastAppId = appId;
     }
 
-    // Link Bar Button
+    // 1. Links Bar
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
     if (linksBar && !linksBar.querySelector('.gse-details-button')) {
-        const lastItem = linksBar.lastElementChild as HTMLElement;
-        const nextLeft = lastItem ? parseInt(lastItem.style.left || '0') + (lastItem.offsetWidth || 100) + 8 : 0;
+        const steamButtons = Array.from(linksBar.children).filter(c => (c as HTMLElement).style.left);
+        const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
+        const nextLeft = lastSteamBtn ? parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8 : 0;
         
         const btn = doc.createElement('div');
         btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
@@ -186,24 +176,18 @@ const processInjection = async (doc: Document) => {
         linksBar.appendChild(btn);
     }
 
-    // General Properties
+    // 2. General Properties
     const generalTarget = Array.from(doc.querySelectorAll('*')).find((el: any) => 
         (el.innerText === 'Launch Options' || el.innerText === 'LAUNCH OPTIONS' || el.innerText === 'Steam Cloud') && el.offsetWidth > 0
     );
     if (generalTarget && !doc.querySelector('.gse-general-injected')) {
         const target = generalTarget.closest('[class*="Section"]') || generalTarget.parentElement;
-        const rd = findReactDOM(doc.defaultView || window);
-        if (target && rd) {
+        if (target) {
             const injectDiv = doc.createElement('div');
             injectDiv.className = 'gse-general-injected';
-            injectDiv.style.cssText = 'margin: 20px 0; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);';
+            injectDiv.style.cssText = 'margin: 20px 0; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);';
             target.parentElement?.insertBefore(injectDiv, target);
-            if (rd.createRoot) {
-                if (!(injectDiv as any)._root) (injectDiv as any)._root = rd.createRoot(injectDiv);
-                (injectDiv as any)._root.render(<GSEGameSettings appId={appId} />);
-            } else {
-                rd.render(<GSEGameSettings appId={appId} />, injectDiv);
-            }
+            steamRender(<GSEGameSettings appId={appId} />, injectDiv);
         }
     }
 };
@@ -213,13 +197,15 @@ export default definePlugin(() => {
         if (!context.m_strName?.startsWith("SP ")) return;
         const doc = context.m_popup?.document;
         if (!doc?.body) return;
+
         const observer = new MutationObserver(() => processInjection(doc));
         observer.observe(doc.body, { childList: true, subtree: true });
         processInjection(doc);
     });
+
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE Active.</div>,
+        content: <div style={{padding: '20px'}}>GSE Achievements is running. Configure per-game in Details or Properties.</div>,
     };
 });
