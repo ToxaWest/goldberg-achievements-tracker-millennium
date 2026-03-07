@@ -195,38 +195,38 @@ const showGSEConfig = (appId: string, doc: Document) => {
 };
 
 /**
- * Separated AppID detection logic for Desktop and BPM
+ * Robust AppID detection
  */
-const getAppId = (doc: Document, isDesktop: boolean) => {
+const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
+    
+    // 1. Try URL Match (very reliable for popups)
+    const url = doc.location.href + doc.location.pathname;
+    const urlMatch = url.match(/\/app\/(\d+)/);
+    if (urlMatch) return urlMatch[1];
 
-    if (isDesktop) {
-        // 1. Try local Manager first (it correctly updates on library navigation)
-        const manager = win.MainWindowBrowserManager;
-        const id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-        if (id) return id;
-
-        // 2. Try specific Hero Image selectors (avoids picking up sidebar icons)
-        const heroSelectors = [
-            '._3NBxSLAZLbbbnul8KfDFjw._2dzwXkCVAuZGFC-qKgo8XB', // Custom header
-            'img.HNbe3eZf6H7dtJ042x1vM[src*="library_hero"]',   // Specific hero class
-            'img[class*="libraryhero_LibraryHeroImg"]'          // Generic hero class
-        ];
-        for (const sel of heroSelectors) {
-            const img = doc.querySelector(sel) as HTMLImageElement;
-            const match = img?.src?.match(/\/assets\/(\d+)/) || img?.src?.match(/\/apps\/(\d+)/);
-            if (match) return match[1];
-        }
-    } else {
-        // BPM Scenario: URL is extremely reliable in popups
-        const urlMatch = doc.location.href.match(/\/app\/(\d+)/) || doc.location.pathname.match(/\/app\/(\d+)/);
-        if (urlMatch) return urlMatch[1];
-
-        // Hero Image fallback for BPM
-        const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"]');
-        const match = (hero as any)?.src?.match(/\/assets\/(\d+)/);
+    // 2. Try Specific Hero Images
+    const hero = doc.querySelector('img[src*="library_hero"], img[class*="LibraryHero"], img[class*="libraryhero"]');
+    if (hero) {
+        const match = (hero as any).src?.match(/\/assets\/(\d+)/) || (hero as any).src?.match(/\/app\/(\d+)/);
         if (match) return match[1];
     }
+
+    // 3. Check window manager
+    const manager = win.MainWindowBrowserManager || (window.top as any)?.MainWindowBrowserManager;
+    const managerId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    if (managerId) return managerId;
+
+    // 4. Main container images fallback
+    const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
+    if (container) {
+        const imgs = Array.from(container.querySelectorAll('img'));
+        for (const img of imgs) {
+            const match = (img.src || "").match(/\/assets\/(\d+)/) || (img.src || "").match(/\/app\/(\d+)/);
+            if (match) return match[1];
+        }
+    }
+
     return null;
 };
 
@@ -240,7 +240,7 @@ const processInjection = async (doc: Document) => {
     const isDesktop = doc.body.classList.contains("DesktopUI") || doc.documentElement.classList.contains("DesktopUI");
     const isBPM = !isDesktop;
 
-    const appId = getAppId(doc, isDesktop);
+    const appId = getAppId(doc);
     if (!appId) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) { existing.remove(); injectedIds.delete(doc); }
@@ -251,7 +251,8 @@ const processInjection = async (doc: Document) => {
     if (isBPM) {
         const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
                          doc.getElementById('«rod»WhatsNew_Content') ||
-                         doc.querySelector('[id*="WhatsNew_Content"]');
+                         doc.querySelector('[id*="WhatsNew_Content"]') ||
+                         doc.querySelector('[class*="whatsnew"]');
 
         if (!whatsNew) {
             const existing = doc.querySelector('.gse-injected-view');
@@ -260,7 +261,7 @@ const processInjection = async (doc: Document) => {
         }
     }
 
-    // Container for injection
+    // Handle game switch or missing view
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
