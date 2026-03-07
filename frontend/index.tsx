@@ -7,6 +7,7 @@ const log = (...args: any[]) => console.log("[GSE]", ...args);
 const getGameConfig = callable<any, any>('get_game_config');
 const getAchievements = callable<any, any>('get_achievements');
 const saveGameConfig = callable<any, any>('save_game_config');
+const getIconBase64 = callable<any, any>('get_icon_base64');
 
 const parseResult = (res: any) => {
     if (typeof res === 'string') {
@@ -16,11 +17,23 @@ const parseResult = (res: any) => {
 };
 
 const AchievementItem = ({ a }: { a: any }) => {
+    const [iconData, setIconData] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        if (a.icon_path) {
+            getIconBase64(a.icon_path).then((res: any) => {
+                // If it's a JSON string, parse it, otherwise use directly
+                const data = typeof res === 'string' && res.startsWith('data:') ? res : parseResult(res);
+                setIconData(data);
+            }).catch(() => {});
+        }
+    }, [a.icon_path]);
+
     return (
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
             <div style={{ width: '32px', height: '32px', background: '#222', flexShrink: 0, borderRadius: '3px', overflow: 'hidden' }}>
-                {a.icon_data ? (
-                    <img src={a.icon_data} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: a.unlocked ? 1 : 0.2 }} />
+                {iconData ? (
+                    <img src={iconData} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: a.unlocked ? 1 : 0.2 }} />
                 ) : (
                     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: '14px' }}>?</div>
                 )}
@@ -57,12 +70,10 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     const handleBrowse = async (setter: (val: string) => void) => {
         const sc = (window as any).SteamClient || (window as any).opener?.SteamClient;
         const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || sc?.OpenFilePicker;
-        
         if (typeof picker !== 'function') {
             alert("File picker not found. Please paste path manually.");
             return;
         }
-
         try {
             const path = await picker("Select achievements.json", "", false);
             if (path) setter(path.replace(/\\/g, '/').replace(/"/g, '').trim());
@@ -82,8 +93,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
-            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
-            
+            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings</h2>
             <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -91,7 +101,6 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setInterfacePath)}>📁</button>
                 </div>
             </div>
-
             <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>STATUS PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -99,9 +108,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
                     <button style={{ background: '#333', border: 'none', color: 'white', padding: '0 12px', cursor: 'pointer' }} onClick={() => handleBrowse(setStatusPath)}>📁</button>
                 </div>
             </div>
-
             <button style={{ width: '100%', background: '#1a9fff', border: 'none', color: 'white', padding: '12px', fontWeight: 'bold', cursor: 'pointer' }} onClick={handleSave}>Save Settings</button>
-
             {achievements.length > 0 && (
                 <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
                     <div style={{ fontSize: '12px', color: '#888', marginBottom: '10px' }}>

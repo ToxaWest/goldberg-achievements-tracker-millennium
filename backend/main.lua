@@ -12,7 +12,7 @@ local settings_path = get_plugin_dir() .. "/settings.json"
 local configs = {}
 local last_status_map = {}
 
--- Simple Base64 Encoder for Icons
+-- Optimized Base64 Encoder
 local function base64_encode(data)
     local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
     return ((data:gsub('.', function(x) 
@@ -91,7 +91,7 @@ end
 
 function get_achievements(...)
     local p = get_payload(...)
-    local id = tostring(p.app_id or "nil")
+    local id = p.app_id
     print("GSE: get_achievements for " .. id)
     
     local cfg = configs[id]
@@ -108,29 +108,28 @@ function get_achievements(...)
             local is_unlocked = s.earned == true or s.earned == 1 or s.earned == "true"
             local icon_rel = is_unlocked and (ach.icon or ach.icongray) or (ach.icongray or ach.icon)
             
-            local icon_data = ""
-            if icon_rel and icon_rel ~= "" then
-                local full_icon_path = base_dir .. icon_rel
-                local raw_icon = safe_read_file(full_icon_path)
-                if raw_icon then
-                    icon_data = "data:image/jpeg;base64," .. base_encode(raw_icon) -- using helper below
-                end
-            end
-
             table.insert(res, {
                 name = ach.name,
                 display_name = ach.displayName or ach.name,
                 description = ach.description or "",
                 unlocked = is_unlocked,
-                icon_data = icon_data
+                -- Send the path, not the data, to prevent crash
+                icon_path = (icon_rel and icon_rel ~= "" and base_dir ~= "") and (base_dir .. icon_rel) or ""
             })
         end
     end
     return json.encode(res)
 end
 
--- Fix for naming collision
-function base_encode(data) return base64_encode(data) end
+-- NEW: On-demand icon loading to prevent large payload crash
+function get_icon_base64(path)
+    if not path or path == "" then return "" end
+    local raw = safe_read_file(path)
+    if not raw then return "" end
+    
+    print("GSE: Encoding icon " .. path)
+    return "data:image/jpeg;base64," .. base64_encode(raw)
+end
 
 -- Lifecycle
 local function on_load()
@@ -145,5 +144,6 @@ return {
     on_frontend_loaded = function() print("GSE: Frontend Connected") end,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
-    get_achievements = get_achievements
+    get_achievements = get_achievements,
+    get_icon_base64 = get_icon_base64
 }
