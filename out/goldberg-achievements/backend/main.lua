@@ -11,6 +11,7 @@ end
 local settings_path = get_plugin_dir() .. "/settings.json"
 local configs = {}
 local last_status_map = {}
+local icon_cache = {}
 
 -- Optimized Base64 Encoder
 local function base64_encode(data)
@@ -51,7 +52,7 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- UNIVERSAL ARGUMENT EXTRACTOR
+-- Robust Argument Parser
 local function get_payload(...)
     local args = {...}
     for i, v in ipairs(args) do
@@ -69,71 +70,69 @@ end
 function get_game_config(...)
     local p = get_payload(...)
     local id = tostring(p.app_id or "nil")
-    print("GSE: get_game_config for " .. id)
     return json.encode(configs[id] or {})
 end
 
 function save_game_config(...)
     local p = get_payload(...)
     local id = tostring(p.app_id or "")
-    print("GSE: save_game_config for " .. id)
-    
-    if id == "" then return json.encode({ success = false, error = "No AppID detected" }) end
-
+    if id == "" then return json.encode({ success = false }) end
     configs[id] = { interface_path = p.interface_path, status_path = p.status_path }
     local ok = safe_write_file(settings_path, json.encode(configs))
-    
-    local status_data = safe_decode(safe_read_file(p.status_path))
-    if status_data then last_status_map[id] = status_data end
-    
     return json.encode({ success = ok })
 end
 
 function get_achievements(...)
     local p = get_payload(...)
     local id = p.app_id
-    print("GSE: get_achievements for " .. id)
-    
     local cfg = configs[id]
     if not cfg then return json.encode({}) end
     
     local meta = safe_decode(safe_read_file(cfg.interface_path)) or {}
     local status = safe_decode(safe_read_file(cfg.status_path)) or {}
-    local base_dir = cfg.interface_path:match("(.*[/\\])") or ""
     
     local res = {}
     for _, ach in ipairs(meta) do
         if type(ach) == "table" and ach.name then
             local s = status[ach.name] or {}
             local is_unlocked = s.earned == true or s.earned == 1 or s.earned == "true"
-            local icon_rel = is_unlocked and (ach.icon or ach.icongray) or (ach.icongray or ach.icon)
-            
             table.insert(res, {
                 name = ach.name,
                 display_name = ach.displayName or ach.name,
                 description = ach.description or "",
                 unlocked = is_unlocked,
-                -- Send the path, not the data, to prevent crash
-                icon_path = (icon_rel and icon_rel ~= "" and base_dir ~= "") and (base_dir .. icon_rel) or ""
+                icon_path = is_unlocked and (ach.icon or ach.icongray) or (ach.icongray or ach.icon)
             })
         end
     end
+
+    -- Sort: Unlocked first, then by name
+    table.sort(res, function(a, b)
+        if a.unlocked ~= b.unlocked then return a.unlocked end
+        return a.display_name < b.display_name
+    end)
+
     return json.encode(res)
 end
 
--- NEW: On-demand icon loading to prevent large payload crash
-function get_icon_base64(path)
+function get_icon_base64(payload)
+    local p = type(payload) == "table" and payload or { path = payload }
+    local path = p.path or p[1]
     if not path or path == "" then return "" end
+    
+    -- Check global cache
+    if icon_cache[path] then return icon_cache[path] end
+
     local raw = safe_read_file(path)
     if not raw then return "" end
     
-    print("GSE: Encoding icon " .. path)
-    return "data:image/jpeg;base64," .. base64_encode(raw)
+    local data = "data:image/jpeg;base64," .. base64_encode(raw)
+    icon_cache[path] = data
+    return data
 end
 
 -- Lifecycle
 local function on_load()
-    print("GSE Backend Loaded")
     local content = safe_read_file(settings_path)
     if content then configs = safe_decode(content) or {} end
     millennium.ready()
@@ -141,7 +140,7 @@ end
 
 return {
     on_load = on_load,
-    on_frontend_loaded = function() print("GSE: Frontend Connected") end,
+    on_frontend_loaded = function() print("GSE Connected") end,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
     get_achievements = get_achievements,
