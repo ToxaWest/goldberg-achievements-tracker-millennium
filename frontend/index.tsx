@@ -3,7 +3,10 @@ import React from 'react';
 
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
-// --- Backend Callables ---
+// ============================================================================
+// 1. BACKEND CALLABLES
+// ============================================================================
+
 const getGameConfig = callable<any, any>('get_game_config');
 const getAchievements = callable<any, any>('get_achievements');
 const saveGameConfig = callable<any, any>('save_game_config');
@@ -16,8 +19,13 @@ const parseResult = (res: any) => {
     return res;
 };
 
-// --- Components ---
+// ============================================================================
+// 2. COMPONENTS
+// ============================================================================
 
+/**
+ * Individual achievement row
+ */
 const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM: boolean }) => {
     const [iconData, setIconData] = React.useState<string | null>(null);
 
@@ -58,16 +66,16 @@ const AchievementItem = ({ a, config, isBPM }: { a: any, config: any, isBPM: boo
     );
 };
 
+/**
+ * Settings Modal Content
+ */
 const GSEGameSettings = ({ appId }: { appId: string }) => {
     const [config, setConfig] = React.useState<any>(null);
-    const [achievements, setAchievements] = React.useState<any[]>([]);
     const [isLoading, setIsLoading] = React.useState(true);
 
     const loadData = async () => {
         const cfg = parseResult(await getGameConfig({ app_id: appId }));
         setConfig(cfg);
-        const data = parseResult(await getAchievements({ app_id: appId }));
-        setAchievements(Array.isArray(data) ? data : []);
         setIsLoading(false);
     };
 
@@ -105,13 +113,15 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     );
 };
 
+/**
+ * Main Achievements Grid View
+ */
 const AchievementsView = ({ appId, isBPM, doc }: { appId: string, isBPM: boolean, doc: Document }) => {
     const [config, setConfig] = React.useState<any>(null);
     const [achievements, setAchievements] = React.useState<any[]>([]);
 
     const load = async () => {
         const cfg = parseResult(await getGameConfig({ app_id: appId }));
-        log(`View: Config for ID ${appId} >`, cfg);
         setConfig(cfg);
         const data = parseResult(await getAchievements({ app_id: appId }));
         setAchievements(Array.isArray(data) ? data : []);
@@ -157,7 +167,9 @@ const AchievementsView = ({ appId, isBPM, doc }: { appId: string, isBPM: boolean
     );
 };
 
-// --- UI Helpers ---
+// ============================================================================
+// 3. UI HELPERS
+// ============================================================================
 
 const showGSEConfig = (appId: string, doc: Document) => {
     const win = (doc.defaultView || window) as any;
@@ -190,31 +202,41 @@ const showGSEConfig = (appId: string, doc: Document) => {
     } else rd.render(element, modalRoot);
 };
 
-const getAppId = (doc: Document) => {
-    const win = (doc.defaultView || window) as any;
-    
-    // 1. Path check (Reliable for BPM Popups)
-    let id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
-    if (id) { log("ID from URL:", id); return id; }
+/**
+ * Robust AppID detection with separate scenarios for Desktop and BPM
+ */
+const getAppId = (doc: Document, isDesktop: boolean) => {
+    if (isDesktop) {
+        // Desktop Scenario: Images on the current document are the most reliable
+        const hero = doc.querySelector('img[src*="library_hero"], img[class*="LibraryHero"]');
+        const heroId = (hero as any)?.src?.match(/\/assets\/(\d+)/)?.[1];
+        if (heroId) return heroId;
 
-    // 2. Manager check (Reliable for Desktop Library)
-    // We prioritize window.top as it tracks the main library route in Desktop
-    const manager = (window.top as any)?.MainWindowBrowserManager || win.MainWindowBrowserManager;
-    id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
-    if (id) { log("ID from Manager:", id); return id; }
+        // Search all images for assets pattern
+        const imgs = Array.from(doc.querySelectorAll('img'));
+        for (const img of imgs) {
+            const match = (img.src || img.getAttribute('src') || "").match(/\/assets\/(\d+)/);
+            if (match) return match[1];
+        }
+        
+        // Last resort: Manager (usually sticky, but better than nothing)
+        const win = (doc.defaultView || window) as any;
+        const manager = win.MainWindowBrowserManager || (window.top as any)?.MainWindowBrowserManager;
+        return manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
+    } else {
+        // BPM Scenario: URL is usually very reliable in popups
+        const urlMatch = doc.location.href.match(/\/app\/(\d+)/) || doc.location.pathname.match(/\/app\/(\d+)/);
+        if (urlMatch) return urlMatch[1];
 
-    // 3. Hero Image (Reliable fallback for any game page)
-    const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"], img[src*="library_hero"], img[src*="/assets/"]') as HTMLImageElement;
-    if (hero) {
-        const src = hero.src || hero.getAttribute('src') || "";
-        const match = src.match(/\/assets\/(\d+)/) || src.match(/\/app\/(\d+)/);
-        if (match) { log("ID from Hero Image:", match[1]); return match[1]; }
+        // Hero Image
+        const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"]');
+        return (hero as any)?.src?.match(/\/assets\/(\d+)/)?.[1] || null;
     }
-    
-    return null;
 };
 
-// --- Core Logic ---
+// ============================================================================
+// 4. CORE INJECTION LOGIC
+// ============================================================================
 
 const injectedIds = new WeakMap<Document, string>();
 
@@ -222,15 +244,14 @@ const processInjection = async (doc: Document) => {
     const isDesktop = doc.body.classList.contains("DesktopUI") || doc.documentElement.classList.contains("DesktopUI");
     const isBPM = !isDesktop;
 
-    const appId = getAppId(doc);
-    
+    const appId = getAppId(doc, isDesktop);
     if (!appId) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) { existing.remove(); injectedIds.delete(doc); }
         return;
     }
 
-    // BPM Tab Validation
+    // BPM Tab Check: Only inject on "What's New"
     if (isBPM) {
         const whatsNew = doc.getElementById('«rs7»WhatsNew_Content') || 
                          doc.getElementById('«rod»WhatsNew_Content') ||
@@ -243,18 +264,17 @@ const processInjection = async (doc: Document) => {
         }
     }
 
-    // Handle game switch per document
-    if (appId !== injectedIds.get(doc)) {
-        log(`Injecting for ${appId} (Mode: ${isBPM ? 'BPM' : 'Desktop'})`);
-        const existing = doc.querySelector('.gse-injected-view');
-        if (existing) existing.remove();
-        injectedIds.set(doc, appId);
-    }
-
+    // Handle game switch or missing view
     const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]');
 
-    if (container && !container.querySelector('.gse-injected-view')) {
+    if (container && (appId !== injectedIds.get(doc) || !container.querySelector('.gse-injected-view'))) {
+        log(`Injecting for ${appId} (Mode: ${isBPM ? 'BPM' : 'Desktop'})`);
+        const existing = doc.querySelector('.gse-injected-view');
+        if (existing) existing.remove();
+        
+        injectedIds.set(doc, appId);
+
         const win = (doc.defaultView || window) as any;
         const rd = win.SP_REACTDOM || win.ReactDOM || win.opener?.SP_REACTDOM || win.opener?.ReactDOM;
         if (!rd) return;
