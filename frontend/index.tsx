@@ -64,6 +64,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     const [isLoading, setIsLoading] = React.useState(true);
 
     const loadData = async () => {
+        log("Settings: Loading data for", appId);
         const cfg = parseResult(await getGameConfig({ app_id: appId }));
         setConfig(cfg);
         const data = parseResult(await getAchievements({ app_id: appId }));
@@ -81,10 +82,12 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             const path = await picker("Select achievements.json", "", false);
             if (path) {
                 const normalized = path.replace(/\\/g, '/').replace(/"/g, '').trim();
-                await saveGameConfig({ ...config, [field]: normalized, app_id: appId });
+                const newCfg = { ...config, [field]: normalized, app_id: appId };
+                log("Settings: Saving new config", newCfg);
+                await saveGameConfig(newCfg);
                 loadData();
             }
-        } catch (e) {}
+        } catch (e) { log("Settings Error:", e); }
     };
 
     if (isLoading) return <div style={{padding: '20px', color: '#888'}}>Syncing...</div>;
@@ -110,7 +113,9 @@ const AchievementsView = ({ appId, isBPM, doc }: { appId: string, isBPM: boolean
     const [achievements, setAchievements] = React.useState<any[]>([]);
 
     const load = async () => {
-        setConfig(parseResult(await getGameConfig({ app_id: appId })));
+        const cfg = parseResult(await getGameConfig({ app_id: appId }));
+        log("View: Config for", appId, cfg);
+        setConfig(cfg);
         const data = parseResult(await getAchievements({ app_id: appId }));
         setAchievements(Array.isArray(data) ? data : []);
     };
@@ -141,7 +146,7 @@ const AchievementsView = ({ appId, isBPM, doc }: { appId: string, isBPM: boolean
             </div>
 
             {(!config || !config.interface_path) ? (
-                <div style={{ color: '#666', fontSize: '12px' }}>Please configure paths in settings.</div>
+                <div style={{ color: '#666', fontSize: '12px' }}>Please configure paths in settings. (ID: {appId})</div>
             ) : (
                 <div style={{ 
                     display: 'grid', 
@@ -191,7 +196,7 @@ const showGSEConfig = (appId: string, doc: Document) => {
 const getAppId = (doc: Document) => {
     const win = (doc.defaultView || window) as any;
     
-    // 1. Try images in THIS document first (very reliable for current game page)
+    // 1. Try images in THIS document first (most reliable for actual page content)
     const hero = doc.querySelector('img[class*="libraryhero_LibraryHeroImg"], img[src*="library_hero"], img[src*="/assets/"]') as HTMLImageElement;
     const match = (hero?.src || hero?.getAttribute('src'))?.match(/\/assets\/(\d+)/);
     if (match) return match[1];
@@ -200,7 +205,7 @@ const getAppId = (doc: Document) => {
     let id = doc.location.pathname?.match(/\/app\/(\d+)/)?.[1] || doc.location.href?.match(/\/app\/(\d+)/)?.[1];
     if (id) return id;
 
-    // 3. Check MainWindowBrowserManager (fall back to global/parent if local fails)
+    // 3. Fallback to MainWindowBrowserManager
     const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager || (window as any).MainWindowBrowserManager;
     id = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     
@@ -212,14 +217,11 @@ const getAppId = (doc: Document) => {
 const injectedIds = new WeakMap<Document, string>();
 
 const processInjection = async (doc: Document) => {
-    const isDesktop = doc.documentElement.classList.contains("DesktopUI") || 
-                      doc.body.classList.contains("DesktopUI") ||
-                      window.document.body.classList.contains("DesktopUI");
+    const isDesktop = doc.documentElement.classList.contains("DesktopUI") || doc.body.classList.contains("DesktopUI");
     const isBPM = !isDesktop;
 
     const appId = getAppId(doc);
     
-    // If no AppID found, cleanup and exit
     if (!appId) {
         const existing = doc.querySelector('.gse-injected-view');
         if (existing) { existing.remove(); injectedIds.delete(doc); }
