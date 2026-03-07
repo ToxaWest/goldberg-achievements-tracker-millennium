@@ -3,14 +3,11 @@ import React from 'react';
 
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
-// Direct callable helpers for maximum reliability
+// Direct callable helpers
 const getGameConfig = callable<any, any>('get_game_config');
 const getAchievements = callable<any, any>('get_achievements');
 const saveGameConfig = callable<any, any>('save_game_config');
 
-/**
- * Robust JSON parser for backend responses
- */
 const parseResult = (res: any) => {
     if (typeof res === 'string') {
         try { return JSON.parse(res); } catch (e) { return res; }
@@ -19,11 +16,14 @@ const parseResult = (res: any) => {
 };
 
 const AchievementItem = ({ a }: { a: any }) => {
-    const iconUrl = a.icon ? "file:///" + a.icon.replace(/\\/g, '/') : null;
     return (
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
             <div style={{ width: '32px', height: '32px', background: '#222', flexShrink: 0, borderRadius: '3px', overflow: 'hidden' }}>
-                {iconUrl && <img src={iconUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: a.unlocked ? 1 : 0.2 }} onError={(e:any) => e.target.style.display='none'} />}
+                {a.icon_data ? (
+                    <img src={a.icon_data} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: a.unlocked ? 1 : 0.2 }} />
+                ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444', fontSize: '14px' }}>?</div>
+                )}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '12px', fontWeight: 'bold', color: a.unlocked ? '#fff' : '#777', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -55,12 +55,11 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
     React.useEffect(() => { loadData(); }, [appId]);
 
     const handleBrowse = async (setter: (val: string) => void) => {
-        // Direct access to SteamClient
         const sc = (window as any).SteamClient || (window as any).opener?.SteamClient;
         const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || sc?.OpenFilePicker;
         
         if (typeof picker !== 'function') {
-            alert("File picker not found. Please paste the path manually.");
+            alert("File picker not found. Please paste path manually.");
             return;
         }
 
@@ -83,7 +82,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
-            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings</h2>
+            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
             
             <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
@@ -120,17 +119,13 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 const showGSEConfig = (appId: string, doc: Document) => {
     const modalRoot = doc.createElement('div');
     doc.body.appendChild(modalRoot);
-    
-    // Find renderer local to the window
     const win = (doc.defaultView || window) as any;
     const rd = win.SP_REACTDOM || win.ReactDOM || (window as any).SP_REACTDOM;
-    
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
         else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
         modalRoot.remove();
     };
-
     const element = (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }} onClick={onClose}>
             <div style={{ width: '600px', background: '#1e2127', borderRadius: '4px' }} onClick={e => e.stopPropagation()}>
@@ -141,16 +136,11 @@ const showGSEConfig = (appId: string, doc: Document) => {
             </div>
         </div>
     );
-
-    try {
-        if (rd?.createRoot) {
-            if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
-            (modalRoot as any)._gseRoot.render(element);
-        } else if (rd?.render) {
-            rd.render(element, modalRoot);
-        }
-    } catch (e) {
-        log("Render Error:", e);
+    if (rd?.createRoot) {
+        if (!(modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot = rd.createRoot(modalRoot);
+        (modalRoot as any)._gseRoot.render(element);
+    } else if (rd?.render) {
+        rd.render(element, modalRoot);
     }
 };
 
@@ -184,19 +174,25 @@ const processInjection = async (doc: Document) => {
     }
 
     const linksBar = doc.querySelector('.DgVQapkBmhAW6oPY5rPZo');
-    if (linksBar && !linksBar.querySelector('.gse-details-button')) {
-        const steamButtons = Array.from(linksBar.children).filter(c => (c as HTMLElement).style.left);
+    if (linksBar) {
+        let btn = linksBar.querySelector('.gse-details-button') as HTMLElement;
+        const steamButtons = Array.from(linksBar.children).filter(c => c !== btn && (c as HTMLElement).style.left);
         const lastSteamBtn = steamButtons.sort((a,b) => parseInt((a as HTMLElement).style.left) - parseInt((b as HTMLElement).style.left)).pop() as HTMLElement;
-        const nextLeft = lastSteamBtn ? parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8 : 0;
-        const btn = doc.createElement('div');
-        btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
-        btn.style.cssText = `left: ${nextLeft}px; top: 0px; position: absolute;`;
-        btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
-        btn.querySelector('.DY4_wSF8h9T5o46hO5I9V')?.addEventListener('click', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            showGSEConfig(appId!, doc);
-        });
-        linksBar.appendChild(btn);
+        
+        if (lastSteamBtn) {
+            const nextLeft = parseInt(lastSteamBtn.style.left) + lastSteamBtn.offsetWidth + 8;
+            if (!btn) {
+                btn = doc.createElement('div');
+                btn.className = '_7k4qmaN8SUMvv6u-L81uk gse-details-button';
+                btn.innerHTML = `<div role="link" class="DY4_wSF8h9T5o46hO5I9V Panel" tabindex="0"><div class="_1b6LYWVijW-9E4YV0keDWZ"><span class="_2sNDjgK9EWiPLdNGkjun-w">GSE Achievements</span></div></div>`;
+                linksBar.appendChild(btn);
+            }
+            btn.style.cssText = `left: ${nextLeft}px; top: 0px; position: absolute;`;
+            btn.onclick = (e) => {
+                e.preventDefault(); e.stopPropagation();
+                showGSEConfig(appId!, doc);
+            };
+        }
     }
 };
 
@@ -212,6 +208,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE Active.</div>,
+        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
     };
 });

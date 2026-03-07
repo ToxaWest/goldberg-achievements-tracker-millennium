@@ -12,6 +12,21 @@ local settings_path = get_plugin_dir() .. "/settings.json"
 local configs = {}
 local last_status_map = {}
 
+-- Simple Base64 Encoder for Icons
+local function base64_encode(data)
+    local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    return ((data:gsub('.', function(x) 
+        local r,b='',x:byte()
+        for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if (#x < 6) then return '' end
+        local c=0
+        for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
+        return b:sub(c+1,c+1)
+    end)..({ '', '==', '=' })[#data%3+1])
+end
+
 -- Safe File/JSON Helpers
 local function safe_read_file(path)
     if not path or path == "" then return nil end
@@ -36,50 +51,46 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- Simple, safe argument extractor
-local function get_payload(payload)
-    if type(payload) == "string" then
-        local decoded = safe_decode(payload)
-        if type(decoded) == "table" then return decoded end
-        return { app_id = payload } -- Treat raw string as AppID
+-- UNIVERSAL ARGUMENT EXTRACTOR
+local function get_payload(...)
+    local args = {...}
+    for i, v in ipairs(args) do
+        if type(v) == "table" and (v.app_id or v[1]) then return v end
+        if type(v) == "string" then
+            local decoded = safe_decode(v)
+            if type(decoded) == "table" and decoded.app_id then return decoded end
+            if v:match("^%d+$") then return { app_id = v, interface_path = args[i+1], status_path = args[i+2] } end
+        end
     end
-    if type(payload) == "table" then return payload end
     return {}
 end
 
 -- Exposed Methods
-function get_game_config(payload)
-    local p = get_payload(payload)
+function get_game_config(...)
+    local p = get_payload(...)
     local id = tostring(p.app_id or "nil")
     print("GSE: get_game_config for " .. id)
     return json.encode(configs[id] or {})
 end
 
-function save_game_config(payload)
-    local p = get_payload(payload)
+function save_game_config(...)
+    local p = get_payload(...)
     local id = tostring(p.app_id or "")
     print("GSE: save_game_config for " .. id)
     
-    if id == "" or id == "nil" then 
-        return json.encode({ success = false, error = "No AppID detected" }) 
-    end
+    if id == "" then return json.encode({ success = false, error = "No AppID detected" }) end
 
-    configs[id] = { 
-        interface_path = p.interface_path or "", 
-        status_path = p.status_path or "" 
-    }
-    
+    configs[id] = { interface_path = p.interface_path, status_path = p.status_path }
     local ok = safe_write_file(settings_path, json.encode(configs))
     
-    -- Cache status immediately
     local status_data = safe_decode(safe_read_file(p.status_path))
     if status_data then last_status_map[id] = status_data end
     
     return json.encode({ success = ok })
 end
 
-function get_achievements(payload)
-    local p = get_payload(payload)
+function get_achievements(...)
+    local p = get_payload(...)
     local id = tostring(p.app_id or "nil")
     print("GSE: get_achievements for " .. id)
     
@@ -97,17 +108,29 @@ function get_achievements(payload)
             local is_unlocked = s.earned == true or s.earned == 1 or s.earned == "true"
             local icon_rel = is_unlocked and (ach.icon or ach.icongray) or (ach.icongray or ach.icon)
             
+            local icon_data = ""
+            if icon_rel and icon_rel ~= "" then
+                local full_icon_path = base_dir .. icon_rel
+                local raw_icon = safe_read_file(full_icon_path)
+                if raw_icon then
+                    icon_data = "data:image/jpeg;base64," .. base_encode(raw_icon) -- using helper below
+                end
+            end
+
             table.insert(res, {
                 name = ach.name,
                 display_name = ach.displayName or ach.name,
                 description = ach.description or "",
                 unlocked = is_unlocked,
-                icon = (icon_rel and icon_rel ~= "" and base_dir ~= "") and (base_dir .. icon_rel) or ""
+                icon_data = icon_data
             })
         end
     end
     return json.encode(res)
 end
+
+-- Fix for naming collision
+function base_encode(data) return base64_encode(data) end
 
 -- Lifecycle
 local function on_load()
