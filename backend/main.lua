@@ -8,11 +8,8 @@ local function get_plugin_dir()
     return path:gsub("\\", "/"):gsub("/$", "")
 end
 
-local plugin_dir = get_plugin_dir()
-local settings_path = plugin_dir .. "/settings.json"
-
+local settings_path = get_plugin_dir() .. "/settings.json"
 local configs = {}
-local last_status_map = {}
 
 -- Safe File/JSON Helpers
 local function safe_read_file(path)
@@ -38,92 +35,80 @@ local function safe_decode(content)
     return status and result or nil
 end
 
--- Robust Argument Normalization
-local function get_args(...)
+-- Extremely Robust Argument Parser
+local function get_payload(...)
     local args = {...}
-    print("GSE Debug: Received " .. #args .. " arguments")
-    for i, v in ipairs(args) do
-        print("  Arg[" .. i .. "] type: " .. type(v) .. " value: " .. tostring(v))
-    end
+    print("GSE Debug: Received " .. #args .. " args")
+    for i, v in ipairs(args) do print("  [" .. i .. "] " .. type(v) .. ": " .. tostring(v)) end
 
-    local payload = args[1]
-    if type(payload) == "string" then
-        local decoded = safe_decode(payload)
-        if type(decoded) == "table" then
-            print("GSE Debug: Decoded string payload into table")
-            return decoded
-        end
+    local first = args[1]
+    
+    -- Case 1: First arg is a table (passed as object from JS)
+    if type(first) == "table" then return first end
+    
+    -- Case 2: First arg is a string (might be JSON or just AppID)
+    if type(first) == "string" then
+        local decoded = safe_decode(first)
+        if type(decoded) == "table" then return decoded end
+        
+        -- Case 3: Positional args (app_id, interface, status)
+        return {
+            app_id = first,
+            interface_path = args[2] or "",
+            status_path = args[3] or ""
+        }
     end
     
-    if type(payload) == "table" then return payload end
-    
-    -- Fallback: positional
-    return {
-        app_id = args[1],
-        interface_path = args[2],
-        status_path = args[3]
-    }
+    return {}
 end
 
 -- Exposed Methods
 function get_game_config(...)
-    local payload = get_args(...)
-    local app_id = tostring(payload.app_id or "nil")
-    print("GSE: get_game_config for " .. app_id)
-    local cfg = configs[app_id] or {}
-    return json.encode(cfg)
+    local p = get_payload(...)
+    local id = tostring(p.app_id or "nil")
+    print("GSE: get_game_config for " .. id)
+    return json.encode(configs[id] or {})
 end
 
 function save_game_config(...)
-    local payload = get_args(...)
-    local app_id = tostring(payload.app_id or "")
-    print("GSE: save_game_config for " .. app_id)
+    local p = get_payload(...)
+    local id = tostring(p.app_id or "")
+    print("GSE: save_game_config for " .. id)
     
-    if app_id == "" then 
-        return json.encode({ success = false, error = "Missing AppID" }) 
-    end
+    if id == "" then return json.encode({ success = false, error = "No AppID detected" }) end
 
-    configs[app_id] = { 
-        interface_path = payload.interface_path or "", 
-        status_path = payload.status_path or "" 
+    configs[id] = { 
+        interface_path = p.interface_path or "", 
+        status_path = p.status_path or "" 
     }
     
-    local success = safe_write_file(settings_path, json.encode(configs))
-    
-    local status_data = safe_decode(safe_read_file(payload.status_path))
-    if status_data then last_status_map[app_id] = status_data end
-    
-    return json.encode({ success = success })
+    local ok = safe_write_file(settings_path, json.encode(configs))
+    return json.encode({ success = ok })
 end
 
 function get_achievements(...)
-    local payload = get_args(...)
-    local app_id = tostring(payload.app_id or "nil")
-    print("GSE: get_achievements for " .. app_id)
+    local p = get_payload(...)
+    local id = tostring(p.app_id or "nil")
+    print("GSE: get_achievements for " .. id)
     
-    local config = configs[app_id]
-    if not config then return json.encode({}) end
+    local cfg = configs[id]
+    if not cfg then return json.encode({}) end
     
-    local meta = safe_decode(safe_read_file(config.interface_path)) or {}
-    local status = safe_decode(safe_read_file(config.status_path)) or {}
+    local meta = safe_decode(safe_read_file(cfg.interface_path)) or {}
+    local status = safe_decode(safe_read_file(cfg.status_path)) or {}
     
-    local result = {}
+    local res = {}
     for _, ach in ipairs(meta) do
         if type(ach) == "table" and ach.name then
-            local ach_status = status[ach.name] or {}
-            table.insert(result, {
+            local s = status[ach.name] or {}
+            table.insert(res, {
                 name = ach.name,
                 display_name = ach.display_name or ach.name,
-                unlocked = ach_status.unlocked or false,
-                unlock_time = ach_status.unlock_time or 0
+                unlocked = s.unlocked or false
             })
         end
     end
-    return json.encode(result)
-end
-
-function get_all_configs()
-    return json.encode(configs)
+    return json.encode(res)
 end
 
 -- Lifecycle
@@ -137,9 +122,8 @@ end
 return {
     on_load = on_load,
     on_frontend_loaded = function() print("GSE: Frontend Connected") end,
-    on_unload = function() print("GSE: Unloading") end,
     get_game_config = get_game_config,
     save_game_config = save_game_config,
     get_achievements = get_achievements,
-    get_all_configs = get_all_configs
+    get_all_configs = function() return json.encode(configs) end
 }

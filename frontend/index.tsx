@@ -3,11 +3,15 @@ import React from 'react';
 
 const log = (...args: any[]) => console.log("[GSE]", ...args);
 
+/**
+ * Enhanced global discovery
+ */
 const getGlobal = (name: string): any => {
     const win = window as any;
     if (win[name]) return win[name];
     try {
         if (win.opener && win.opener[name]) return win.opener[name];
+        if (win.top && win.top[name]) return win.top[name];
         if (win.parent && win.parent[name]) return win.parent[name];
     } catch (e) {}
     const manager = win.MainWindowBrowserManager || win.opener?.MainWindowBrowserManager;
@@ -20,29 +24,33 @@ const getGlobal = (name: string): any => {
 
 const callBackend = async (method: string, args: any) => {
     const m = getGlobal('Millennium');
-    if (!m?.callServerMethod) return null;
+    if (!m?.callServerMethod) {
+        log("ERROR: Millennium.callServerMethod not found");
+        return null;
+    }
     try {
-        log(`Backend Call: ${method}`, args);
-        // Stringify payload to guarantee Lua receives a string it can decode
-        const res = await m.callServerMethod("goldberg-achievements", method, JSON.stringify(args));
-        log(`Backend Result (${method}):`, res);
-        if (typeof res === 'string') {
+        log(`CALLING: ${method}`, args);
+        // Match HLTB: Use positional arguments for maximum compatibility
+        const res = await m.callServerMethod("goldberg-achievements", method, args.app_id, args.interface_path || "", args.status_path || "");
+        log(`RESPONSE: ${method}`, res);
+        
+        if (typeof res === 'string' && (res.startsWith('{') || res.startsWith('['))) {
             try { return JSON.parse(res); } catch (e) { return res; }
         }
         return res;
     } catch (e) {
-        log(`Backend Error (${method}):`, e);
+        log(`EXCEPTION: ${method}`, e);
         return null;
     }
 };
 
 const notify = (title: string, message: string) => {
     const sc = getGlobal('SteamClient');
-    const n = sc?.Notifications;
-    if (n && typeof n.DisplayNotification === 'function') {
-        n.DisplayNotification(title, message, "", "");
+    const fn = sc?.Notifications?.DisplayNotification || sc?.DisplayNotification;
+    if (typeof fn === 'function') {
+        fn.call(sc?.Notifications || sc, title, message, "", "");
     } else {
-        log("NOTIFICATION:", title, message);
+        log("NOTIFY FALLBACK:", title, message);
     }
 };
 
@@ -68,18 +76,18 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     const handleBrowse = async (setter: (val: string) => void) => {
         const sc = getGlobal('SteamClient');
-        // Aggressive deep search for OpenFilePicker
+        // Based on your dump, Window exists. OpenFilePicker is usually inside Window or Browser.
         const picker = sc?.Window?.OpenFilePicker || sc?.Browser?.OpenFilePicker || sc?.OpenFilePicker;
         
+        log("DEBUG: Picker type:", typeof picker);
+        if (sc?.Window) log("DEBUG: sc.Window exists, keys:", Object.keys(sc.Window));
+
         if (typeof picker !== 'function') {
-            log("Picker Error. SteamClient keys:", Object.keys(sc || {}));
-            if (sc?.Window) log("Window keys:", Object.keys(sc.Window));
-            alert("File picker not found. Please paste the path manually.");
+            alert("File picker not found. Paste path manually.");
             return;
         }
 
         try {
-            log("Opening Picker...");
             const path = await picker("Select achievements.json", "", false);
             if (path) setter(path.replace(/\\/g, '/').replace(/"/g, '').trim());
         } catch (e) {
@@ -98,7 +106,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
             const data = await callBackend('get_achievements', { app_id: appId });
             setAchievements(Array.isArray(data) ? data : []);
         } else {
-            notify("GSE Error", "Save failed.");
+            notify("GSE Error", "Save failed. Check console.");
         }
     };
 
@@ -106,7 +114,7 @@ const GSEGameSettings = ({ appId }: { appId: string }) => {
 
     return (
         <div style={{ padding: '25px', color: 'white', backgroundColor: '#1b2838', borderRadius: '4px', fontFamily: 'system-ui, sans-serif' }}>
-            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Settings (ID: {appId})</h2>
+            <h2 style={{ marginBottom: '20px', fontSize: '18px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>GSE Achievement Settings</h2>
             <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', color: '#888', fontSize: '11px', marginBottom: '5px' }}>INTERFACE PATH</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -139,7 +147,7 @@ const showGSEConfig = (appId: string, doc: Document) => {
     const rd = getGlobal('SP_REACTDOM');
     const onClose = () => {
         if (rd?.unmountComponentAtNode) rd.unmountComponentAtNode(modalRoot);
-        else if ((modalRoot as any)._root) (modalRoot as any)._root.unmount();
+        else if ((modalRoot as any)._gseRoot) (modalRoot as any)._gseRoot.unmount();
         modalRoot.remove();
     };
     const element = (
@@ -163,9 +171,7 @@ const showGSEConfig = (appId: string, doc: Document) => {
 let lastAppId: string | null = null;
 
 const processInjection = async (doc: Document) => {
-    const win = (doc.defaultView || window) as any;
-    const gWin = window as any;
-    const manager = gWin.MainWindowBrowserManager || win.MainWindowBrowserManager;
+    const manager = getGlobal('MainWindowBrowserManager');
     let appId = null;
     if (manager?.m_lastLocation?.pathname) {
         const match = manager.m_lastLocation.pathname.match(/\/app\/(\d+)/);
@@ -174,6 +180,13 @@ const processInjection = async (doc: Document) => {
     if (!appId) {
         const match = doc.location.href.match(/\/app\/(\d+)/) || doc.location.href.match(/appid=(\d+)/);
         if (match) appId = match[1];
+    }
+    if (!appId) {
+        const images = doc.querySelectorAll('img[src*="/assets/"]');
+        for (const img of Array.from(images) as HTMLImageElement[]) {
+            const match = img.src.match(/\/assets\/(\d+)/);
+            if (match) { appId = match[1]; break; }
+        }
     }
     if (!appId) return;
 
@@ -211,6 +224,6 @@ export default definePlugin(() => {
     return {
         title: "GSE Achievements",
         icon: <IconsModule.Settings />,
-        content: <div style={{padding: '20px'}}>GSE plugin active.</div>,
+        content: <div style={{padding: '20px'}}>GSE active.</div>,
     };
 });
