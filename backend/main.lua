@@ -13,19 +13,24 @@ local configs = {}
 local last_status_map = {}
 local icon_cache = {}
 
--- Optimized Base64 Encoder
+-- Optimized Base64 Encoder for Lua 5.1/Luajit
 local function base64_encode(data)
     local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-    return ((data:gsub('.', function(x) 
-        local r,b='',x:byte()
-        for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
-        return r;
-    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
-        if (#x < 6) then return '' end
-        local c=0
-        for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
-        return b:sub(c+1,c+1)
-    end)..({ '', '==', '=' })[#data%3+1])
+    local t, n = {}, 0
+    for i = 1, #data, 3 do
+        local b1, b2, b3 = data:byte(i, i + 2)
+        local c1 = math.floor(b1 / 4)
+        local c2 = (b1 % 4) * 16 + math.floor((b2 or 0) / 16)
+        local c3 = ((b2 or 0) % 16) * 4 + math.floor((b3 or 0) / 64)
+        local c4 = (b3 or 0) % 64
+        
+        t[n + 1] = b:sub(c1 + 1, c1 + 1)
+        t[n + 2] = b:sub(c2 + 1, c2 + 1)
+        t[n + 3] = b2 and b:sub(c3 + 1, c3 + 1) or '='
+        t[n + 4] = b3 and b:sub(c4 + 1, c4 + 1) or '='
+        n = n + 4
+    end
+    return table.concat(t)
 end
 
 -- Safe File/JSON Helpers

@@ -137,10 +137,14 @@ const showGSEConfig = (appId: string, doc: Document) => {
 };
 
 const injectBPM = async (doc: Document, appId: string) => {
-    const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH');
+    const container = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
+                      doc.querySelector('[class*="gamepaddetails_ControlsContainer"]') ||
+                      doc.querySelector('[class*="gamepaddetails_GameDetailsControls"]');
+
     if (container && !container.querySelector('.gse-bpm-injected')) {
         const injectDiv = doc.createElement('div');
         injectDiv.className = 'gse-bpm-injected';
+        injectDiv.style.width = '100%';
         container.prepend(injectDiv);
         
         const win = (doc.defaultView || window) as any;
@@ -149,6 +153,18 @@ const injectBPM = async (doc: Document, appId: string) => {
             const achievements = parseResult(await getAchievements({ app_id: appId }));
             const config = parseResult(await getGameConfig({ app_id: appId }));
             
+            if (!config || !config.interface_path) {
+                const element = (
+                    <div style={{ padding: '20px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', marginBottom: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                        <h2 style={{ fontSize: '20px', color: '#888' }}>GSE Achievements</h2>
+                        <div style={{ color: '#555', fontSize: '14px' }}>Please configure achievement paths in Desktop Mode first.</div>
+                    </div>
+                );
+                if (rd.createRoot) rd.createRoot(injectDiv).render(element);
+                else rd.render(element, injectDiv);
+                return;
+            }
+
             const element = (
                 <div style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', marginBottom: '20px' }}>
                     <h2 style={{ fontSize: '24px', marginBottom: '15px' }}>GSE Achievements</h2>
@@ -167,9 +183,14 @@ const injectBPM = async (doc: Document, appId: string) => {
 let lastAppId: string | null = null;
 
 const processInjection = async (doc: Document) => {
-    const manager = (window as any).MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
+    const win = (doc.defaultView || window) as any;
+    const manager = win.MainWindowBrowserManager || (doc.defaultView as any)?.MainWindowBrowserManager;
+    
     let appId = manager?.m_lastLocation?.pathname?.match(/\/app\/(\d+)/)?.[1];
     if (!appId) appId = doc.location.href.match(/\/app\/(\d+)/)?.[1];
+    if (!appId && win.SteamClient?.Apps?.GetAppID) {
+        try { appId = win.SteamClient.Apps.GetAppID()?.toString(); } catch (e) {}
+    }
     
     if (!appId) return;
     if (appId !== lastAppId) {
@@ -196,7 +217,14 @@ const processInjection = async (doc: Document) => {
     }
 
     // 2. Big Picture Mode Injection
-    injectBPM(doc, appId);
+    // Try multiple selectors for BPM game details container
+    const bpmContainer = doc.querySelector('.vzLedtsu3TtTlKLEKzIhH') || 
+                       doc.querySelector('[class*="gamepaddetails_ControlsContainer"]') ||
+                       doc.querySelector('[class*="gamepaddetails_GameDetailsControls"]');
+    
+    if (bpmContainer && !bpmContainer.querySelector('.gse-bpm-injected')) {
+        injectBPM(doc, appId);
+    }
 };
 
 export default definePlugin(() => {
