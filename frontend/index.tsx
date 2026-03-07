@@ -196,27 +196,33 @@ const injectDesktop = (doc: Document) => {
     // Modern injection point: Next to SVGIcon_Settings grandparent
     const settingsIcon = doc.querySelector('.SVGIcon_Settings');
     if (settingsIcon) {
-        const parent = settingsIcon.parentElement; // div._3qDWQGB0rtwM3qpXTb11Q-
-        const grandparent = parent?.parentElement; // div._3oddBTkj_FjknCgBnPqcmQ
-        const container = grandparent?.parentElement; // div.lO1IF132jJ1gc9yz2HYvV
+        const grandparent = settingsIcon.closest('._3oddBTkj_FjknCgBnPqcmQ');
+        const container = grandparent?.parentElement;
 
         if (container && !container.querySelector('.gse-details-button')) {
             log("Desktop settings icon found, injecting next to its container.");
-            const btn = doc.createElement('div');
-            // Adding a class for the wrapper to match Steam's layout if possible, 
-            // but at least our button itself will have the correct Steam class.
-            btn.className = 'gse-details-button-wrapper'; 
-            btn.innerHTML = `
-                <div class="_3qDWQGB0rtwM3qpXTb11Q- Focusable gse-details-button" role="button" tabindex="0" aria-label="GSE Achievements">
-                    <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor; margin-top: 4px;">
-                        <path d="M18,2H6C4.9,2,4,2.9,4,4v2c0,2.2,1.8,4,4,4h1v1.7c-2.3,0.5-4,2.5-4,4.8V20h16v-1.5c0-2.3-1.7-4.3-4-4.8V10h1c2.2,0,4-1.8,4-4V4 C20,2.9,19.1,2,18,2z M6,6V4h2v2H6z M18,6h-2V4h2V6z"></path>
-                    </svg>
-                </div>`;
             
-            // Insert after the settings wrapper
-            grandparent.after(btn);
-            const actualBtn = btn.querySelector('.gse-details-button') as HTMLElement;
-            actualBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
+            const wrapper = doc.createElement('div');
+            wrapper.className = '_3oddBTkj_FjknCgBnPqcmQ gse-details-button-wrapper';
+            
+            const btn = doc.createElement('div');
+            btn.className = '_3qDWQGB0rtwM3qpXTb11Q- Focusable gse-details-button';
+            btn.setAttribute('role', 'button');
+            btn.setAttribute('tabindex', '0');
+            btn.setAttribute('aria-label', 'GSE Achievements');
+            btn.style.display = 'flex';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            
+            btn.innerHTML = `
+                <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;">
+                    <path d="M18,2H6C4.9,2,4,2.9,4,4v2c0,2.2,1.8,4,4,4h1v1.7c-2.3,0.5-4,2.5-4,4.8V20h16v-1.5c0-2.3-1.7-4.3-4-4.8V10h1c2.2,0,4-1.8,4-4V4 C20,2.9,19.1,2,18,2z M6,6V4h2v2H6z M18,6h-2V4h2V6z"></path>
+                </svg>`;
+            
+            wrapper.appendChild(btn);
+            grandparent.insertAdjacentElement('afterend', wrapper);
+            
+            btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showGSEConfig(appId, doc); };
             return;
         }
     }
@@ -329,7 +335,7 @@ export default definePlugin(() => {
     // Main window observer
     const mainObserver = new MutationObserver(() => processInjection(document));
     mainObserver.observe(document.body, { childList: true, subtree: true });
-    processInjection(document);
+    injectDesktop(document);
 
     // Additional windows hook
     (Millennium as any).AddWindowCreateHook?.((context: any) => {
